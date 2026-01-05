@@ -18,14 +18,17 @@ def _evalutation_function(dataPtr):
     
     return evaluation
 
+
+currDir = os.path.dirname(os.path.abspath(__file__))
+
 # check OS to fetch corresponding library
 if sys.platform == "win32":
-    initPath = os.path.abspath("example.dll")
-    init = ctypes.CDLL(libPath)
+    dllPath = os.path.join(currDir, "..", "bindings","example.dll")
 else:
-    libPath = os.path.abspath("example.so")
+    dllPath = os.path.join(currDir, "..", "bindings","example.so")
 
-    init = ctypes.CDLL(libPath)
+initPath = os.path.abspath(dllPath)
+init = ctypes.CDLL(initPath)
 
 # define parameter type and initialise engine
 init.startEngine.argtypes = [ctypes.c_void_p]
