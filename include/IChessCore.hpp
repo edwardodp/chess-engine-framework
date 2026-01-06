@@ -1,6 +1,8 @@
 #pragma once
+
 #include "Types.hpp"
 #include "BoardState.hpp"
+
 #include <vector>
 #include <string_view>
 
