@@ -2,6 +2,11 @@
 import numpy as np
 from numba import njit
 
+# func to get
+@njit
+def getPiece(boardData, rank, file):
+
+
 # func to get what piece is at a square (given chess coords e.g. a1 given as 2 parameters a, 1)
 
 # func to get value of a piece at a square (given chess coords)
@@ -23,6 +28,3 @@ from numba import njit
 # function to get mobility of black (number of legal moves)
 
 # function to return move count
-
-
-
