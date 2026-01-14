@@ -1,7 +1,6 @@
-""" The main entry point and the 'backend' of sorts """
 import numpy as np
 from numba import cfunc, types, carray
-from evaluation import evaluationFunction
+from evaluation import evaluation_function
 import ctypes
 import sys 
 import os
@@ -12,23 +11,22 @@ import os
 def _evalutation_function(dataPtr):
 
     # convert c array to numpy array
-    boardData = carray(dataPtr, (12,), np.uint64)
+    board_data = carray(dataPtr, (12,), np.uint64)
     
-    evaluation = np.int32(evaluationFunction(boardData))
+    evaluation = np.int32(evaluation_function(board_data))
     
     return evaluation
 
-
-currDir = os.path.dirname(os.path.abspath(__file__))
+curr_dir = os.path.dirname(os.path.abspath(__file__))
 
 # check OS to fetch corresponding library
 if sys.platform == "win32":
-    dllPath = os.path.join(currDir, "..", "bindings","example.dll")
+    dll_path = os.path.join(curr_dir, "..", "bindings","example.dll")
 else:
-    dllPath = os.path.join(currDir, "..", "bindings","example.so")
+    dll_path = os.path.join(curr_dir, "..", "bindings","example.so")
 
-initPath = os.path.abspath(dllPath)
-init = ctypes.CDLL(initPath)
+init_path = os.path.abspath(dll_path)
+init = ctypes.CDLL(init_path)
 
 # define parameter type and initialise engine
 init.startEngine.argtypes = [ctypes.c_void_p]
