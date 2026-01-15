@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit
 import boardTools as bt
 
-# piece type enum
+# pieces
 PAWN_WHITE = 1
 PAWN_BLACK = -1
 KNIGHT_WHITE = 3

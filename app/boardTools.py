@@ -1,12 +1,13 @@
 import numpy as np
 from numba import njit
 
+# gets piece at specific square
 @njit
-def get_piece(board_data, rank, file):
+def get_piece(board_pieces_data, rank, file):
     shifts = 63 - ((file - 1) * 9 + (ord(rank) - ord('a')))
     mask = 1 << shifts
-    for i in range(len(board_data)):
-        if board_data[i] & mask:
+    for i in range(len(board_pieces_data)):
+        if board_pieces_data[i] & mask:
             if i == 0:
                 return 1
             else if i == 1 or i == 2:
@@ -28,10 +29,12 @@ def get_piece(board_data, rank, file):
             else:
                 return -200
 
-# check if peice is at square 
-
-# func to check if king in check
-
-# function to get outposts
-
-# function to return move count
+# checks if a white or black piece is at a square
+@njit
+def check_square(board_occupancy_data, rank, file, colour):
+    shifts = 63 - ((file - 1) * 9 + (ord(rank) - ord('a')))
+    mask = 1 << shifts
+    if board_occupancy_data[colour] & mask:
+        return True
+    else:
+        return False
