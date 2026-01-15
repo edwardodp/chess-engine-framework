@@ -5,12 +5,21 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Source Files
-# Automatically picks up MoveGen.cpp, Search.cpp, Attacks.cpp
+# --- 1. Fetch GoogleTest ---
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/archive/refs/heads/main.zip
+)
+# For Windows: Prevent GTest from overriding our compiler flags
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+# --- 2. Core Sources ---
 file(GLOB_RECURSE CORE_SOURCES "src/core/*.cpp")
 set(APP_SOURCES src/Main.cpp)
 
-# --- 1. Python Shared Library (ChessLib) ---
+# --- 3. Main Library (ChessLib) ---
 add_library(ChessLib SHARED ${CORE_SOURCES} ${APP_SOURCES})
 target_include_directories(ChessLib PUBLIC include)
 target_compile_definitions(ChessLib PRIVATE BUILD_AS_LIBRARY)
@@ -19,12 +28,14 @@ if(APPLE)
     set_target_properties(ChessLib PROPERTIES SUFFIX ".so")
 endif()
 
-# --- 2. C++ Test Executable (ChessTest) ---
-add_executable(ChessTest ${APP_SOURCES} ${CORE_SOURCES})
-target_include_directories(ChessTest PUBLIC include)
+# --- 4. Test Executable (UnitTests) ---
+# We create a new executable just for testing
+add_executable(UnitTests tests/ChessTests.cpp ${CORE_SOURCES})
+target_include_directories(UnitTests PUBLIC include)
+target_link_libraries(UnitTests GTest::gtest_main)
 
-# --- Compiler Options ---
-foreach(TARGET ChessLib ChessTest)
+# --- 5. Compiler Options ---
+foreach(TARGET ChessLib UnitTests)
     if(MSVC)
         target_compile_options(${TARGET} PUBLIC /constexpr:steps 1000000 /O2)
     else()
@@ -35,3 +46,6 @@ foreach(TARGET ChessLib ChessTest)
         )
     endif()
 endforeach()
+
+enable_testing()
+add_test(NAME ChessEngineTests COMMAND UnitTests)
