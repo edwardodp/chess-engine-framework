@@ -1,6 +1,7 @@
 import numpy as np
 from numba import njit
 
+# gets piece at specific square
 @njit
 def get_piece(board_pieces_data, rank, file):
     shifts = 63 - ((file - 1) * 9 + (ord(rank) - ord('a')))
@@ -28,6 +29,7 @@ def get_piece(board_pieces_data, rank, file):
             else:
                 return -200
 
+# checks if a white or black piece is at a square
 @njit
 def check_square(board_occupancy_data, rank, file, colour):
     shifts = 63 - ((file - 1) * 9 + (ord(rank) - ord('a')))
@@ -36,6 +38,3 @@ def check_square(board_occupancy_data, rank, file, colour):
         return True
     else:
         return False
-
-# function to get outposts
-

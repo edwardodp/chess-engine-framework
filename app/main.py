@@ -5,7 +5,6 @@ import ctypes
 import sys 
 import os
 
-# return 32 bit signed int, 1 parameter - pointer of type 64 bit unsigned int (pointing to C board data array) another 64 bit unsigned int to the occupancy bitboards. 3 ints which say which squares have white peices, black and any colour peice. unsigned 32 bit which is number of moves.
 @cfunc(types.int32(types.CPointer(types.uint64), types.CPointer(types.uint64), types.uint32))
 # wrapper evalutation function
 def _evalutation_function(board_pieces_ptr, board_occupancy_ptr, move_count):

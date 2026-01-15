@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit
 import boardTools as bt
 
-# piece type enum
+# pieces
 PAWN_WHITE = 1
 PAWN_BLACK = -1
 KNIGHT_WHITE = 3
@@ -15,8 +15,6 @@ QUEEN_WHITE = 9
 QUEEN_BLACK = -9
 KING_WHITE = 200
 KING_BLACK = -200
-
-# WHITE = 0, BLACK = 1
 
 @njit
 def evaluation_function(board_pieces_data, board_occupancy_data, move_count):
