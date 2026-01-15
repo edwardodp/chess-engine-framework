@@ -5,6 +5,9 @@ import numpy as np
 from numba import cfunc, types, carray
 from evaluation import evaluation_function
 
+
+COMPETITION_DEPTH = 5;
+
 # Returns: int32
 # Args: int64* (pieces), int64* (occupancy), uint32 (move_count)
 @cfunc(types.int32(types.CPointer(types.int64), types.CPointer(types.int64), types.uint32))
@@ -33,12 +36,15 @@ def main():
         print(f"[Error] Failed to load library: {e}")
         sys.exit(1)
 
-    chess_lib.startEngine.argtypes = [ctypes.c_void_p]
+    chess_lib.startEngine.argtypes = [ctypes.c_void_p, ctypes.c_int]
     
     print(f"--- Chess Engine Interface Loaded ---")
     print(f"Library: {lib_path}")
     
-    chess_lib.startEngine(evaluation_wrapper.address)
+    engine_callback = evaluation_wrapper
+
+    print("Starting Engine...")
+    chess_lib.startEngine(engine_callback.address, COMPETITION_DEPTH)
 
 if __name__ == "__main__":
     main()

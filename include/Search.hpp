@@ -11,5 +11,7 @@ namespace Search {
         EvalCallback evalFunc;
     };
 
+    Square find_king(const BoardState& board, Colour side);
+
     Move iterative_deepening(BoardState& board, const SearchParams& params);
 }
