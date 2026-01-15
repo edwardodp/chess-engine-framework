@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <iostream>
 
 
 using Bitboard = std::uint64_t;
@@ -19,6 +20,22 @@ enum class Square : int {
     A8 = 56, B8, C8, D8, E8, F8, G8, H8,
     None = 64
 };
+
+inline std::ostream& operator<<(std::ostream& os, Square sq) {
+    static const char* squareNames[] = {
+        "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1",
+        "a2", "b2", "c2", "d2", "e2", "f2", "g2", "h2",
+        "a3", "b3", "c3", "d3", "e3", "f3", "g3", "h3",
+        "a4", "b4", "c4", "d4", "e4", "f4", "g4", "h4",
+        "a5", "b5", "c5", "d5", "e5", "f5", "g5", "h5",
+        "a6", "b6", "c6", "d6", "e6", "f6", "g6", "h6",
+        "a7", "b7", "c7", "d7", "e7", "f7", "g7", "h7",
+        "a8", "b8", "c8", "d8", "e8", "f8", "g8", "h8",
+        "None"
+    };
+    if (sq == Square::None) return os << "None";
+    return os << squareNames[static_cast<int>(sq)];
+}
 
 enum class MoveFlag : uint16_t {
     Quiet = 0b0000,

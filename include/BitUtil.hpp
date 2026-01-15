@@ -20,6 +20,10 @@ namespace BitUtil {
         return static_cast<Square>(index);
     }
 
+    constexpr int lsb(Bitboard bb) {
+        return std::countr_zero(bb);
+    }
+
     constexpr int count_bits(Bitboard bb) {
         return std::popcount(bb);
     }

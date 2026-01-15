@@ -28,6 +28,9 @@ struct BoardState {
 
     std::vector<UndoInfo> history;
 
+    void make_move(Move m);
+    void undo_move(Move m);
+
     static constexpr size_t get_piece_index(Colour c, PieceType p) {
         return static_cast<size_t>(c) * 6 + static_cast<size_t>(p);
     }
