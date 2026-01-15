@@ -58,7 +58,7 @@ namespace Search {
     // --- QUIESCENCE SEARCH ---
     int32_t quiescence(BoardState& board, int32_t alpha, int32_t beta, EvalCallback eval, uint32_t moves_played) {
         // 1. Stand Pat
-        int32_t stand_pat = eval(board.pieces.data(), board.occupancy.data(), board.full_move_number);
+        int32_t stand_pat = eval(board.pieces.data(), board.occupancy.data(), (board.to_move == Colour::White ? 0 : 1));
         if (stand_pat >= beta) return beta;
         if (stand_pat > alpha) alpha = stand_pat;
 
@@ -139,9 +139,13 @@ namespace Search {
         return alpha;
     }
 
-    Move iterative_deepening(BoardState& board, const SearchParams& params) {
+    Move iterative_deepening(BoardState& board, const SearchParams& params, SearchStats& stats) {
         Move best_move;
         
+        // Reset Stats
+        stats.depth_reached = 0;
+        stats.score = 0;
+
         for (int d = 1; d <= params.depth; ++d) {
             int32_t alpha = -200000;
             int32_t beta = 200000;
@@ -181,6 +185,12 @@ namespace Search {
 
             if (current_best_move.raw() != 0) {
                 best_move = current_best_move;
+                
+                // UPDATE STATS FOR GUI
+                stats.depth_reached = d;
+                stats.score = best_score;
+                stats.best_move_raw = best_move.raw();
+                
                 std::cout << "Info: Depth " << d << " Score: " << best_score << std::endl;
             }
         }

@@ -113,35 +113,7 @@ namespace Evaluation {
         return board;
     }
 
-    int32_t evaluate(const uint64_t* pieces, const uint64_t* occupancy, uint32_t moveCount) {
-        // --- 1. GAME OVER DETECTION (Keep this for your Python script!) ---
-        BoardState board = reconstruct_board(pieces, occupancy, moveCount);
-        std::vector<Move> moves;
-        MoveGen::generate_moves(board, moves);
-
-        int legal_moves = 0;
-        for (const auto& m : moves) {
-            board.make_move(m);
-            Colour us = (board.to_move == Colour::White) ? Colour::Black : Colour::White; 
-            Square king_sq = Search::find_king(board, us);
-            if (!Attacks::is_square_attacked(king_sq, board.to_move, board.pieces.data(), board.occupancy[2])) {
-                legal_moves++;
-            }
-            board.undo_move(m);
-            if (legal_moves > 0) break; 
-        }
-
-        if (legal_moves == 0) {
-            Colour us = board.to_move;
-            Square king_sq = Search::find_king(board, us);
-            bool in_check = Attacks::is_square_attacked(king_sq, (us == Colour::White ? Colour::Black : Colour::White), board.pieces.data(), board.occupancy[2]);
-            return in_check ? ((us == Colour::White) ? -100000 : 100000) : 0; // Mate vs Stalemate
-        }
-
-        // --- 2. CRACKED EVALUATION (Tapered PeSTO) ---
-        // We calculate two scores: Middle Game (mg) and End Game (eg)
-        // Then we blend them based on how many pieces are on the board (Phase).
-        
+    int32_t evaluate(const uint64_t* pieces, const uint64_t* occupancy, uint32_t sideToMove) {
         int mg[2] = {0, 0}; // [0]=White, [1]=Black
         int eg[2] = {0, 0};
         int game_phase = 0;
@@ -153,12 +125,9 @@ namespace Evaluation {
             while (w) {
                 int sq = static_cast<int>(BitUtil::pop_lsb(w));
                 
-                // Add Material
                 mg[0] += mat_vals[p][0];
                 eg[0] += mat_vals[p][1];
                 
-                // Add Positional Bonus
-                // Pointers to tables: Pawn=0, N=1, B=2, R=3, Q=4, K=5
                 const int (*table)[2] = nullptr;
                 switch(p) {
                     case 0: table = val_pawn; break;
@@ -169,24 +138,8 @@ namespace Evaluation {
                     case 5: table = val_king; break;
                 }
                 
-                // White reads table directly (flip vertically for visual correctness if standard internal board is Rank 1=0)
-                // Assuming A1=0 (standard): PeSTO is usually defined A1..H8.
-                // We access table[sq].
-                // NOTE: Standard PeSTO usually defined from Black's perspective or requires flipping.
-                // Our tables above are defined for WHITE from A1 to H8.
-                
-                // Wait, typically tables are defined relative to "rank 8" at top.
-                // Our tables above are Standard PeSTO. White's A1 is index 0 (bottom left). 
-                // However, standard PeSTO tables usually have "rank 1" values at the start.
-                // Let's assume the tables above are correct for A1=0..H8=63.
-                
-                // Actually, standard PeSTO has values like -50 for pawns on rank 1.
-                // The table `val_pawn` starts with 0s. That suggests Rank 1.
-                // So index 0 is A1.
-                
                 mg[0] += table[sq][0];
                 eg[0] += table[sq][1];
-
                 game_phase += phase_weights[p];
             }
 
@@ -208,32 +161,36 @@ namespace Evaluation {
                     case 5: table = val_king; break;
                 }
 
-                // For Black, we must mirror the square vertically!
-                // A1 (0) becomes A8 (56).
+                // Mirror for Black
                 int mirrored_sq = sq ^ 56; 
 
                 mg[1] += table[mirrored_sq][0];
                 eg[1] += table[mirrored_sq][1];
-
                 game_phase += phase_weights[p];
             }
         }
 
-        // --- 3. TAPERING ---
-        // Max phase is roughly 24 (all pieces). 0 is empty.
-        // If phase > 24, cap it.
+        // --- TAPERING ---
         if (game_phase > 24) game_phase = 24;
         
         int mg_score = mg[0] - mg[1];
         int eg_score = eg[0] - eg[1];
         
-        // Taper Formula:
-        // Score = (MG * Phase + EG * (24 - Phase)) / 24
         int32_t final_score = (mg_score * game_phase + eg_score * (24 - game_phase)) / 24;
 
-        // Return from White's perspective?
-        // Your engine likely expects "positive = White winning".
-        // The loop calculated (White - Black), so this is correct.
+        // IMPORTANT: Return score relative to the side to move?
+        // Standard engine convention: Always return relative to "Side to move".
+        // BUT your Search.cpp logic (NegaMax) might expect absolute "White - Black".
+        // Let's look at your Search.cpp:
+        // You use: int32_t score = -alpha_beta(...);
+        // This implies NegaMax. NegaMax requires the evaluation to be "Score from MY perspective".
+        
+        // If sideToMove == 0 (White), return (White - Black).
+        // If sideToMove == 1 (Black), return (Black - White) -> which is -(White - Black).
+        
+        if (sideToMove == 1) {
+            return -final_score;
+        }
         
         return final_score;
     }

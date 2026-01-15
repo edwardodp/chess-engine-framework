@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BoardState.hpp"
+#include <cstdint>
 
 namespace Search {
 
@@ -11,7 +12,13 @@ namespace Search {
         EvalCallback evalFunc;
     };
 
+    struct SearchStats {
+        int depth_reached = 0;
+        int32_t score = 0;
+        int best_move_raw = 0;
+    };
+
     Square find_king(const BoardState& board, Colour side);
 
-    Move iterative_deepening(BoardState& board, const SearchParams& params);
+    Move iterative_deepening(BoardState& board, const SearchParams& params, SearchStats& stats);
 }

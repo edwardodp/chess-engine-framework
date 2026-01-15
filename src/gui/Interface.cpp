@@ -6,6 +6,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <iomanip> // For string formatting
 
 #include "BoardState.hpp"
 #include "MoveGen.hpp"
@@ -39,11 +40,9 @@ struct Assets {
                 textures[id] = tex;
             }
         };
-        // WHITE
         load_piece(1, "Chess_plt45.png"); load_piece(2, "Chess_nlt45.png");
         load_piece(3, "Chess_blt45.png"); load_piece(4, "Chess_rlt45.png");
         load_piece(5, "Chess_qlt45.png"); load_piece(6, "Chess_klt45.png");
-        // BLACK
         load_piece(-1, "Chess_pdt45.png"); load_piece(-2, "Chess_ndt45.png");
         load_piece(-3, "Chess_bdt45.png"); load_piece(-4, "Chess_rdt45.png");
         load_piece(-5, "Chess_qdt45.png"); load_piece(-6, "Chess_kdt45.png");
@@ -51,17 +50,29 @@ struct Assets {
 };
 
 // --- HELPERS ---
-Square get_square_at(int mouse_x, int mouse_y) {
+Square get_square_at(int mouse_x, int mouse_y, bool flipped) {
     int x = mouse_x - OFFSET_X;
     int y = mouse_y - OFFSET_Y;
     if (x < 0 || x >= BOARD_PIXEL_SIZE || y < 0 || y >= BOARD_PIXEL_SIZE) return Square::None;
-    int file = x / TILE_SIZE;
-    int rank = 7 - (y / TILE_SIZE); 
+    
+    int col = x / TILE_SIZE;
+    int row = y / TILE_SIZE; // 0 at top, 7 at bottom
+
+    int file, rank;
+    if (flipped) {
+        // Flipped: TopLeft is H1 (File 7, Rank 0)
+        file = 7 - col;
+        rank = row; 
+    } else {
+        // Normal: TopLeft is A8 (File 0, Rank 7)
+        file = col;
+        rank = 7 - row;
+    }
+    
     return static_cast<Square>(rank * 8 + file);
 }
 
 int get_piece_at(const BoardState& b, Square sq) {
-    int s = static_cast<int>(sq);
     for (int i = 0; i < 12; ++i) {
         if (BitUtil::get_bit(b.pieces[i], sq)) return (i < 6) ? (i + 1) : -(i - 5);
     }
@@ -75,7 +86,7 @@ namespace GUI {
         window.setFramerateLimit(30);
         ImGui::SFML::Init(window);
 
-        // Init Engine Logic
+        // Init Logic
         Attacks::init(); 
         BoardState board;
         // Standard Start
@@ -106,12 +117,16 @@ namespace GUI {
         std::vector<Move> valid_moves;
         sf::Clock deltaClock;
 
-        // --- PROMOTION STATE ---
+        // UI State
         bool is_promoting = false;
         Square promo_from = Square::None;
         Square promo_to = Square::None;
+        
+        // NEW STATES
+        bool view_flipped = false;
+        Colour human_side = Colour::White;
+        Search::SearchStats last_stats;
 
-        // Helper to Draw
         auto render_board = [&]() {
             window.clear(sf::Color(30, 30, 30));
 
@@ -121,38 +136,63 @@ namespace GUI {
                 for (int f = 0; f < 8; ++f) {
                     bool is_light = ((r + f) % 2 != 0);
                     tile.setFillColor(is_light ? sf::Color(240, 217, 181) : sf::Color(181, 136, 99));
-                    tile.setPosition(OFFSET_X + f * TILE_SIZE, OFFSET_Y + (7 - r) * TILE_SIZE); 
+                    
+                    // Calc Pos based on Flip
+                    float x, y;
+                    if (view_flipped) {
+                        x = OFFSET_X + (7 - f) * TILE_SIZE;
+                        y = OFFSET_Y + r * TILE_SIZE;
+                    } else {
+                        x = OFFSET_X + f * TILE_SIZE;
+                        y = OFFSET_Y + (7 - r) * TILE_SIZE;
+                    }
+
+                    tile.setPosition(x, y); 
                     window.draw(tile);
                 }
             }
 
-            // 2. Highlights (Only if NOT promoting)
-            if (!is_promoting && selected_sq != Square::None) {
-                tile.setFillColor(sf::Color(255, 255, 0, 100)); 
-                int sel_r = static_cast<int>(selected_sq) / 8;
-                int sel_f = static_cast<int>(selected_sq) % 8;
-                tile.setPosition(OFFSET_X + sel_f * TILE_SIZE, OFFSET_Y + (7 - sel_r) * TILE_SIZE);
+            // 2. Highlights & Pieces
+            auto draw_highlight = [&](Square sq, sf::Color col) {
+                int r = static_cast<int>(sq) / 8;
+                int f = static_cast<int>(sq) % 8;
+                float x, y;
+                if (view_flipped) {
+                    x = OFFSET_X + (7 - f) * TILE_SIZE;
+                    y = OFFSET_Y + r * TILE_SIZE;
+                } else {
+                    x = OFFSET_X + f * TILE_SIZE;
+                    y = OFFSET_Y + (7 - r) * TILE_SIZE;
+                }
+                tile.setPosition(x, y);
+                tile.setFillColor(col);
                 window.draw(tile);
+            };
 
-                tile.setFillColor(sf::Color(100, 255, 100, 100)); 
+            if (!is_promoting && selected_sq != Square::None) {
+                draw_highlight(selected_sq, sf::Color(255, 255, 0, 100));
                 for (const auto& m : valid_moves) {
-                    int to_r = static_cast<int>(m.to()) / 8;
-                    int to_f = static_cast<int>(m.to()) % 8;
-                    tile.setPosition(OFFSET_X + to_f * TILE_SIZE, OFFSET_Y + (7 - to_r) * TILE_SIZE);
-                    window.draw(tile);
+                    draw_highlight(m.to(), sf::Color(100, 255, 100, 100));
                 }
             }
+            
+            // Last Move Highlight (Optional polish)
+            // ...
 
             // 3. Pieces
             for (int i = 0; i < 64; ++i) {
-                // Don't draw the pawn if it's currently promoting (it's in limbo)
                 if (is_promoting && static_cast<Square>(i) == promo_from) continue;
-
                 int p = get_piece_at(board, static_cast<Square>(i));
                 if (p != 0) {
                     int r = i / 8; int f = i % 8;
-                    float x = OFFSET_X + f * TILE_SIZE + TILE_SIZE/2.0f;
-                    float y = OFFSET_Y + (7 - r) * TILE_SIZE + TILE_SIZE/2.0f;
+                    float x, y;
+                    if (view_flipped) {
+                        x = OFFSET_X + (7 - f) * TILE_SIZE + TILE_SIZE/2.0f;
+                        y = OFFSET_Y + r * TILE_SIZE + TILE_SIZE/2.0f;
+                    } else {
+                        x = OFFSET_X + f * TILE_SIZE + TILE_SIZE/2.0f;
+                        y = OFFSET_Y + (7 - r) * TILE_SIZE + TILE_SIZE/2.0f;
+                    }
 
                     if (assets.textures.count(p)) {
                         sf::Sprite s(assets.textures[p]);
@@ -161,40 +201,24 @@ namespace GUI {
                         s.setOrigin(s.getLocalBounds().width/2, s.getLocalBounds().height/2);
                         s.setPosition(x, y);
                         window.draw(s);
-                    } else if (assets.has_font) {
-                        sf::Text t; t.setFont(assets.font); t.setString(piece_symbols[p]);
-                        t.setCharacterSize(TILE_SIZE*0.6f);
-                        t.setFillColor(p>0?sf::Color::White:sf::Color::Black);
-                        t.setOutlineThickness(2);
-                        t.setOrigin(t.getLocalBounds().width/2, t.getLocalBounds().height/2);
-                        t.setPosition(x - 10, y - 10);
-                        window.draw(t);
                     }
                 }
             }
 
-            // 4. Promotion UI (Overlay)
+            // 4. Promotion Overlay
             if (is_promoting) {
-                // Dim background
                 sf::RectangleShape overlay(sf::Vector2f(WIN_WIDTH, WIN_HEIGHT));
                 overlay.setFillColor(sf::Color(0, 0, 0, 150));
                 window.draw(overlay);
-
-                // Draw Options (Queen, Rook, Bishop, Knight)
-                // Center of the screen
-                float cx = WIN_WIDTH / 2.0f;
-                float cy = WIN_HEIGHT / 2.0f;
-                int ids[] = {5, 4, 3, 2}; // White IDs
+                float cx = WIN_WIDTH / 2.0f; float cy = WIN_HEIGHT / 2.0f;
+                int ids[] = {5, 4, 3, 2}; 
                 if (board.to_move == Colour::Black) { ids[0]=-5; ids[1]=-4; ids[2]=-3; ids[3]=-2; }
-
                 for(int i=0; i<4; ++i) {
                     if (assets.textures.count(ids[i])) {
                         sf::Sprite s(assets.textures[ids[i]]);
-                        // Make them big
                         float scale = (TILE_SIZE * 1.2f) / s.getLocalBounds().width;
                         s.setScale(scale, scale);
                         s.setOrigin(s.getLocalBounds().width/2, s.getLocalBounds().height/2);
-                        // Arrange in a row
                         s.setPosition(cx + (i - 1.5f) * (TILE_SIZE * 1.5f), cy);
                         window.draw(s);
                     }
@@ -208,117 +232,80 @@ namespace GUI {
                 ImGui::SFML::ProcessEvent(window, event);
                 if (event.type == sf::Event::Closed) window.close();
 
-                if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
-                    if (ImGui::GetIO().WantCaptureMouse) continue;
+                // HUMAN INPUT (Only if it is Human's turn)
+                if (board.to_move == human_side) {
+                    if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
+                        if (ImGui::GetIO().WantCaptureMouse) continue;
 
-                    // --- PROMOTION CLICK HANDLING ---
-                    if (is_promoting) {
-                        float cx = WIN_WIDTH / 2.0f;
-                        float cy = WIN_HEIGHT / 2.0f;
-                        float btn_size = TILE_SIZE * 1.5f;
-                        int clicked_idx = -1;
-
-                        // Check which piece was clicked
-                        for(int i=0; i<4; ++i) {
-                            float btn_x = cx + (i - 1.5f) * btn_size;
-                            float mx = (float)event.mouseButton.x;
-                            float my = (float)event.mouseButton.y;
-                            
-                            // Simple box check
-                            if (mx > btn_x - btn_size/2 && mx < btn_x + btn_size/2 &&
-                                my > cy - btn_size/2 && my < cy + btn_size/2) {
-                                clicked_idx = i;
-                                break;
-                            }
-                        }
-
-                        if (clicked_idx != -1) {
-                            // Find the matching move in valid_moves
-                            for(const auto& m : valid_moves) {
-                                if (m.to() == promo_to && m.from() == promo_from && m.is_promotion()) {
-                                    bool match = false;
-                                    // Map index 0->Q, 1->R, 2->B, 3->N
-                                    if (clicked_idx == 0 && m.is_promo_queen()) match = true;
-                                    if (clicked_idx == 1 && m.is_promo_rook()) match = true;
-                                    if (clicked_idx == 2 && m.is_promo_bishop()) match = true;
-                                    if (clicked_idx == 3 && m.is_promo_knight()) match = true;
-
-                                    if (match) {
-                                        board.make_move(m);
-                                        is_promoting = false;
-                                        selected_sq = Square::None;
-                                        valid_moves.clear();
-                                        
-                                        // Update & Bot Move
-                                        render_board(); window.display();
-                                        
-                                        Search::SearchParams params;
-                                        params.depth = depth; params.evalFunc = evalFunc;
-                                        Move botMove = Search::iterative_deepening(board, params);
-                                        board.make_move(botMove);
-                                        break;
-                                    }
+                        if (is_promoting) {
+                            // ... Promotion Click Logic (Same as before) ...
+                            float cx = WIN_WIDTH / 2.0f; float cy = WIN_HEIGHT / 2.0f;
+                            float btn_size = TILE_SIZE * 1.5f;
+                            int clicked_idx = -1;
+                            for(int i=0; i<4; ++i) {
+                                float btn_x = cx + (i - 1.5f) * btn_size;
+                                float mx = (float)event.mouseButton.x; float my = (float)event.mouseButton.y;
+                                if (mx > btn_x - btn_size/2 && mx < btn_x + btn_size/2 &&
+                                    my > cy - btn_size/2 && my < cy + btn_size/2) {
+                                    clicked_idx = i; break;
                                 }
                             }
-                        }
-                    } 
-                    // --- NORMAL CLICK HANDLING ---
-                    else {
-                        Square clicked = get_square_at(event.mouseButton.x, event.mouseButton.y);
-                        if (clicked != Square::None) {
-                            bool moved = false;
-                            
-                            if (selected_sq != Square::None) {
-                                for (const auto& m : valid_moves) {
-                                    if (m.to() == clicked) {
-                                        // DETECT PROMOTION START
-                                        if (m.is_promotion()) {
-                                            is_promoting = true;
-                                            promo_from = m.from();
-                                            promo_to = m.to();
-                                            moved = true; 
-                                            // Break without making move yet!
-                                            break; 
-                                        }
-
-                                        board.make_move(m);
-                                        selected_sq = Square::None;
-                                        valid_moves.clear();
-                                        moved = true;
-                                        
-                                        render_board(); window.display();
-                                        
-                                        Search::SearchParams params;
-                                        params.depth = depth; params.evalFunc = evalFunc;
-                                        Move botMove = Search::iterative_deepening(board, params);
-                                        board.make_move(botMove);
-                                        break;
-                                    }
-                                }
-                            }
-
-                            if (!moved && !is_promoting) {
-                                // Select Logic
-                                int p = get_piece_at(board, clicked);
-                                bool is_white = (p > 0);
-                                if (p != 0 && ((board.to_move == Colour::White) == is_white)) {
-                                    selected_sq = clicked;
-                                    valid_moves.clear();
-                                    std::vector<Move> all_moves;
-                                    MoveGen::generate_moves(board, all_moves);
-                                    for (const auto& m : all_moves) {
-                                        if (m.from() == selected_sq) {
+                            if (clicked_idx != -1) {
+                                for(const auto& m : valid_moves) {
+                                    if (m.to() == promo_to && m.from() == promo_from && m.is_promotion()) {
+                                        bool match = false;
+                                        if (clicked_idx == 0 && m.is_promo_queen()) match = true;
+                                        if (clicked_idx == 1 && m.is_promo_rook()) match = true;
+                                        if (clicked_idx == 2 && m.is_promo_bishop()) match = true;
+                                        if (clicked_idx == 3 && m.is_promo_knight()) match = true;
+                                        if (match) {
                                             board.make_move(m);
-                                            Colour us = (board.to_move == Colour::White) ? Colour::Black : Colour::White; 
-                                            Square king_sq = Search::find_king(board, us);
-                                            bool illegal = Attacks::is_square_attacked(king_sq, board.to_move, board.pieces.data(), board.occupancy[2]);
-                                            board.undo_move(m);
-                                            if (!illegal) valid_moves.push_back(m);
+                                            is_promoting = false;
+                                            selected_sq = Square::None; valid_moves.clear();
+                                            break;
                                         }
                                     }
-                                } else {
-                                    selected_sq = Square::None;
-                                    valid_moves.clear();
+                                }
+                            }
+                        } 
+                        else {
+                            // Normal Click
+                            Square clicked = get_square_at(event.mouseButton.x, event.mouseButton.y, view_flipped);
+                            if (clicked != Square::None) {
+                                bool moved = false;
+                                if (selected_sq != Square::None) {
+                                    for (const auto& m : valid_moves) {
+                                        if (m.to() == clicked) {
+                                            if (m.is_promotion()) {
+                                                is_promoting = true; promo_from = m.from(); promo_to = m.to();
+                                                moved = true; break;
+                                            }
+                                            board.make_move(m);
+                                            selected_sq = Square::None; valid_moves.clear();
+                                            moved = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                                if (!moved && !is_promoting) {
+                                    int p = get_piece_at(board, clicked);
+                                    bool is_white = (p > 0);
+                                    if (p != 0 && ((board.to_move == Colour::White) == is_white)) {
+                                        selected_sq = clicked; valid_moves.clear();
+                                        std::vector<Move> all_moves; MoveGen::generate_moves(board, all_moves);
+                                        for (const auto& m : all_moves) {
+                                            if (m.from() == selected_sq) {
+                                                board.make_move(m);
+                                                Colour us = (board.to_move == Colour::White) ? Colour::Black : Colour::White; 
+                                                Square king_sq = Search::find_king(board, us);
+                                                bool illegal = Attacks::is_square_attacked(king_sq, board.to_move, board.pieces.data(), board.occupancy[2]);
+                                                board.undo_move(m);
+                                                if (!illegal) valid_moves.push_back(m);
+                                            }
+                                        }
+                                    } else {
+                                        selected_sq = Square::None; valid_moves.clear();
+                                    }
                                 }
                             }
                         }
@@ -326,16 +313,79 @@ namespace GUI {
                 }
             }
 
+            // BOT LOGIC (Run if not Human's turn)
+            if (board.to_move != human_side && !is_promoting) {
+                // Force a draw frame so we see the human's last move
+                render_board(); 
+                // Draw a "Thinking..." overlay maybe?
+                window.display(); 
+
+                Search::SearchParams params;
+                params.depth = depth; 
+                params.evalFunc = evalFunc; 
+                
+                // PASS STATS STRUCT
+                Move botMove = Search::iterative_deepening(board, params, last_stats);
+                
+                if (botMove.raw() != 0) {
+                     board.make_move(botMove);
+                } else {
+                    // Checkmate or Stalemate handling
+                }
+                
+                // Clear inputs
+                selected_sq = Square::None;
+                valid_moves.clear();
+            }
+
             ImGui::SFML::Update(window, deltaClock.restart());
             render_board();
 
-            // UI
+            // SIDEBAR UI
             ImGui::SetNextWindowPos(sf::Vector2f(WIN_WIDTH - PANEL_WIDTH, 0));
             ImGui::SetNextWindowSize(sf::Vector2f(PANEL_WIDTH, WIN_HEIGHT));
             ImGui::Begin("Controls", nullptr, ImGuiWindowFlags_NoDecoration);
-            if(is_promoting) ImGui::TextColored(ImVec4(1,0,0,1), "PROMOTION: Pick a piece!");
+            
+            ImGui::TextColored(ImVec4(1, 1, 0, 1), "GAME STATUS");
+            ImGui::Separator();
             ImGui::Text("Turn: %s", (board.to_move == Colour::White ? "White" : "Black"));
-            if (ImGui::Button("Reset")) {
+            ImGui::Text("Move #: %d", board.full_move_number);
+            
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0, 1, 1, 1), "PLAYER SETTINGS");
+            ImGui::Separator();
+            
+            // Side Selection
+            if (ImGui::RadioButton("Play as White", human_side == Colour::White)) {
+                human_side = Colour::White;
+                view_flipped = false;
+            }
+            if (ImGui::RadioButton("Play as Black", human_side == Colour::Black)) {
+                human_side = Colour::Black;
+                view_flipped = true;
+            }
+            
+            ImGui::Checkbox("Flip Board View", &view_flipped);
+
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0, 1, 0, 1), "ENGINE STATS");
+            ImGui::Separator();
+            
+            if (last_stats.depth_reached > 0) {
+                ImGui::Text("Depth: %d", last_stats.depth_reached);
+                
+                // Format score nicely
+                float score_val = last_stats.score / 100.0f;
+                if (last_stats.score > 90000) ImGui::Text("Eval: Mate (Win)");
+                else if (last_stats.score < -90000) ImGui::Text("Eval: Mate (Loss)");
+                else ImGui::Text("Eval: %.2f", score_val);
+            } else {
+                ImGui::Text("Waiting for bot...");
+            }
+
+            ImGui::Spacing();
+            ImGui::Separator();
+            if (ImGui::Button("Reset Game", ImVec2(100, 30))) {
                 board = BoardState(); 
                 board.pieces[0] = 0x000000000000FF00ULL; board.pieces[6] = 0x00FF000000000000ULL;
                 board.pieces[1] = 0x0000000000000042ULL; board.pieces[7] = 0x4200000000000000ULL;
@@ -351,9 +401,11 @@ namespace GUI {
                 board.castle_rights = 0b1111;
                 board.full_move_number = 1;
                 is_promoting = false;
+                last_stats = Search::SearchStats();
+                // Reset human side if desired, or keep preference
             }
-            ImGui::End();
 
+            ImGui::End();
             ImGui::SFML::Render(window);
             window.display();
         }
