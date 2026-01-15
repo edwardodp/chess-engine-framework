@@ -1,35 +1,44 @@
+import sys
+import os
+import ctypes
 import numpy as np
 from numba import cfunc, types, carray
 from evaluation import evaluation_function
-import ctypes
-import sys 
-import os
 
-# return 32 bit signed int, 1 parameter - pointer of type 64 bit unsigned int (pointing to C board data array) another 64 bit unsigned int to the occupancy bitboards. 3 ints which say which squares have white peices, black and any colour peice. unsigned 32 bit which is number of moves.
-@cfunc(types.int32(types.CPointer(types.uint64), types.CPointer(types.uint64), types.uint32))
-# wrapper evalutation function
-def _evalutation_function(board_pieces_ptr, board_occupancy_ptr, move_count):
-
-    # convert c array to numpy array
-    board_pieces_data = carray(board_pieces_ptr, (12,), np.uint64)
-    board_occupancy_data = carray(board_occupancy_ptr, (3,), np.uint64)
+# Returns: int32
+# Args: int64* (pieces), int64* (occupancy), uint32 (move_count)
+@cfunc(types.int32(types.CPointer(types.int64), types.CPointer(types.int64), types.uint32))
+def evaluation_wrapper(board_pieces_ptr, board_occupancy_ptr, move_count):
+    board_pieces = carray(board_pieces_ptr, (12,), np.int64)
+    board_occupancy = carray(board_occupancy_ptr, (3,), np.int64)
     
-    evaluation = np.int32(evaluation_function(board_pieces_data, board_occupancy_data, move_count))
+    score = evaluation_function(board_pieces, board_occupancy, move_count)
     
-    return evaluation
+    return np.int32(score)
 
-curr_dir = os.path.dirname(os.path.abspath(__file__))
+def main():
+    curr_dir = os.path.dirname(os.path.abspath(__file__))
+    lib_name = "ChessLib.dll" if sys.platform == "win32" else "libChessLib.so"
+    lib_path = os.path.join(curr_dir, "..", "bindings", lib_name)
+    lib_path = os.path.abspath(lib_path)
 
-# check OS to fetch corresponding library
-if sys.platform == "win32":
-    dll_path = os.path.join(curr_dir, "..", "bindings","example.dll")
-else:
-    dll_path = os.path.join(curr_dir, "..", "bindings","example.so")
+    if not os.path.exists(lib_path):
+        print(f"[Error] Shared library not found at: {lib_path}")
+        print("Please compile the C++ core and move the output to the 'bindings/' folder.")
+        sys.exit(1)
 
-init_path = os.path.abspath(dll_path)
-init = ctypes.CDLL(init_path)
+    try:
+        chess_lib = ctypes.CDLL(lib_path)
+    except OSError as e:
+        print(f"[Error] Failed to load library: {e}")
+        sys.exit(1)
 
-# define parameter type and initialise engine
-init.startEngine.argtypes = [ctypes.c_void_p]
-init.startEngine(_evalutation_function.address)
+    chess_lib.startEngine.argtypes = [ctypes.c_void_p]
+    
+    print(f"--- Chess Engine Interface Loaded ---")
+    print(f"Library: {lib_path}")
+    
+    chess_lib.startEngine(evaluation_wrapper.address)
 
+if __name__ == "__main__":
+    main()
