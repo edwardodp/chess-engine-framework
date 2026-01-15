@@ -16,6 +16,8 @@ QUEEN_BLACK = -9
 KING_WHITE = 200
 KING_BLACK = -200
 
+# WHITE = 0, BLACK = 1
+
 @njit
 def evaluation_function(board_pieces_data, board_occupancy_data, move_count):
     evaluation = 0
