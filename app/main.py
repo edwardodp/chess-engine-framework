@@ -11,8 +11,8 @@ import os
 def _evalutation_function(board_pieces_ptr, board_occupancy_ptr, move_count):
 
     # convert c array to numpy array
-    board_pieces_data = carray(board_pieces_ptr, (12,), np.uint64)
-    board_occupancy_data = carray(board_occupancy_ptr, (3,), np.uint64)
+    board_pieces_data = carray(board_pieces_ptr, (12,), np.int64)
+    board_occupancy_data = carray(board_occupancy_ptr, (3,), np.int64)
     
     evaluation = np.int32(evaluation_function(board_pieces_data, board_occupancy_data, move_count))
     
