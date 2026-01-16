@@ -5,7 +5,11 @@ This project will allow you to make your own custom chess engine by implementing
 
 ---
 ## Competition details
-The competition will run in 2 parts. The first part is development. This is when you will be implementing your evaluation functions and will run from W1 Monday - W4 Sunday. Submissions will be open during the last week of development. These submissions will be judged based on technical prowess and how creative the solution is. From these submissions, 5 will be selected to enter the next part of the competition where the chess engines will be pitted against chess players from Chess Soc on W5 Thursday! The chess engines will then by judged by Chess Soc based on playing style and general performance against real opponents. 
+The competition will run in 2 parts. The first part is development. This is when you will be implementing your evaluation functions and will run from W1 Friday - W4 Sunday. Submissions will be open during the last week of development. These submissions will be judged based on technical prowess and how creative the solution is. 
+
+From these submissions, 5 will be selected to enter the next part of the competition where the chess engines will be pitted against chess players from Chess Soc on W5 Thursday! The chess engines will then by judged by Chess Soc based on playing style and general performance against real opponents. 
+
+There are £400 in prizes to be won so get coding!
 
 ---
 
@@ -19,7 +23,7 @@ app
 ```
 ---
 ## How to run
-Firstly you will need to setup your python virtual environment. Make sure you are always working in your python virtual environment.
+Firstly you will need to setup your python virtual environment. Make sure you are always working in your python virtual environment. The DCS machines do not support the python version necessary to run this.
 
 ### Linux/macOS
 1. Create the virtual environment in the root of this project `python3 -m venv .venv`
