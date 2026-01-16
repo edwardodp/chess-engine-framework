@@ -26,5 +26,6 @@ def get_piece(board_data, file, rank):
 def check_square(board_occupancy_data, file, rank, colour):
     shifts = ((rank - 1) * 8 + (ord(file) - ord('a')))
     mask = 1 << shifts
-    if board_occupancy_data[colour] & mask: return True
+    occupancy_map = int(board_occupancy_data[colour])
+    if occupancy_map & mask: return True
     else: return False
