@@ -5,7 +5,7 @@ on: [push, pull_request]
 jobs:
   build:
     name: Build on ${{ matrix.os }}
-    # We use macos-13 (Intel) to ensure the dylib works on both Intel and Apple Silicon (via Rosetta)
+    # We use macos-15, which the log indicates is the new Intel runner
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -14,7 +14,7 @@ jobs:
             output_file: libChessLib.so
           - os: windows-latest
             output_file: ChessLib.dll
-          - os: macos-13
+          - os: macos-15
             output_file: libChessLib.dylib
 
     steps:
@@ -27,19 +27,21 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y libxrandr-dev libxcursor-dev libudev-dev libopenal-dev libflac-dev libvorbis-dev libgl1-mesa-dev libegl1-mesa-dev libfreetype6-dev libx11-dev
 
-    # --- MAC DEPENDENCIES (The Nuclear Option) ---
+    # --- MAC DEPENDENCIES (VCPKG) ---
     - name: Install Mac Deps (VCPKG)
       if: runner.os == 'macOS'
       run: |
-        # Install SFML Statically using VCPKG
-        # This compiles Freetype from source as a .a library, eliminating the Framework issue.
+        # Install SFML Statically using VCPKG.
+        # Since we are on a native Intel runner (macos-15), this matches the system architecture.
         vcpkg install sfml:x64-osx-static
 
     # --- CONFIGURE CMAKE ---
     - name: Configure CMake
       run: |
         if [ "$RUNNER_OS" == "macOS" ]; then
-          # On Mac, tell CMake to use the VCPKG toolchain
+          # On Mac, we just point to the VCPKG toolchain.
+          # We NO LONGER need the cross-compile flag (-DCMAKE_OSX_ARCHITECTURES)
+          # because we are running on a native Intel machine.
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake \
             -DVCPKG_TARGET_TRIPLET=x64-osx-static
