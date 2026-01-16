@@ -1,0 +1,54 @@
+name: Build Shared Libraries
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            output_file: libChessLib.so
+            # Your CMakeLists.txt produces .so on Linux
+          - os: windows-latest
+            output_file: ChessLib.dll
+            # Your CMakeLists.txt produces .dll on Windows
+          - os: macos-latest
+            output_file: libChessLib.dylib
+            # Your CMakeLists.txt forces .so on Mac, but we will rename it to .dylib
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # --- LINUX DEPENDENCIES ---
+    # SFML needs X11 and OpenGL libraries to compile on Linux
+    - name: Install Linux Deps
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libxrandr-dev libxcursor-dev libudev-dev libopenal-dev libflac-dev libvorbis-dev libgl1-mesa-dev libegl1-mesa-dev
+
+    # --- CONFIGURE CMAKE ---
+    - name: Configure CMake
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+    # --- BUILD ---
+    - name: Build
+      run: cmake --build build --config Release
+
+    # --- RENAME MAC FILE (.so -> .dylib) ---
+    # Your CMakeLists.txt forces ".so" on Apple. We fix that here for distribution.
+    - name: Rename Mac Library
+      if: runner.os == 'macOS'
+      run: mv build/libChessLib.so build/libChessLib.dylib
+
+    # --- UPLOAD ARTIFACTS ---
+    - name: Upload Library
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.output_file }}
+        path: |
+          build/${{ matrix.output_file }}
+          build/Release/${{ matrix.output_file }}
