@@ -3,38 +3,28 @@ from numba import njit
 
 # gets piece at specific square
 @njit
-def get_piece(board_pieces_data, rank, file):
-    shifts = 63 - ((file - 1) * 9 + (ord(rank) - ord('a')))
+def get_piece(board_data, file, rank):
+    shifts = ((rank - 1) * 8 + (ord(file) - ord('a')))
     mask = 1 << shifts
-    for i in range(len(board_pieces_data)):
-        if board_pieces_data[i] & mask:
-            if i == 0:
-                return 1
-            else if i == 1 or i == 2:
-                return 3
-            else if i == 3:
-                return 5
-            else if i == 4:
-                return 9
-            else if i == 5:
-                return 200
-            else if i == 6:
-                return -1
-            else if i == 7 or i == 8:
-                return -3
-            else if i == 9:
-                return -5
-            else if i == 10:
-                return -9
-            else:
-                return -200
+    for i in range(len(board_data)):
+        val = int(board_data[i])
+        if val & mask:
+            if i == 0: return 1
+            elif i == 1 or i == 2: return 3
+            elif i == 3: return 5
+            elif i == 4: return 9
+            elif i == 5: return 200
+            elif i == 6: return -1
+            elif i == 7 or i == 8: return -3
+            elif i == 9: return -5
+            elif i == 10: return -9
+            else: return -200
+    return 0 # empty
 
 # checks if a white or black piece is at a square
 @njit
-def check_square(board_occupancy_data, rank, file, colour):
-    shifts = 63 - ((file - 1) * 9 + (ord(rank) - ord('a')))
+def check_square(board_occupancy_data, file, rank, colour):
+    shifts = ((rank - 1) * 8 + (ord(file) - ord('a')))
     mask = 1 << shifts
-    if board_occupancy_data[colour] & mask:
-        return True
-    else:
-        return False
+    if board_occupancy_data[colour] & mask: return True
+    else: return False
