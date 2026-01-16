@@ -5,19 +5,17 @@ on: [push, pull_request]
 jobs:
   build:
     name: Build on ${{ matrix.os }}
+    # We use macos-13 (Intel) to ensure the dylib works on both Intel and Apple Silicon (via Rosetta)
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             output_file: libChessLib.so
-            # Your CMakeLists.txt produces .so on Linux
           - os: windows-latest
             output_file: ChessLib.dll
-            # Your CMakeLists.txt produces .dll on Windows
-          - os: macos-latest
+          - os: macos-13
             output_file: libChessLib.dylib
-            # Your CMakeLists.txt forces .so on Mac, but we will rename it to .dylib
 
     steps:
     - uses: actions/checkout@v4
@@ -27,31 +25,33 @@ jobs:
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          libxrandr-dev \
-          libxcursor-dev \
-          libudev-dev \
-          libopenal-dev \
-          libflac-dev \
-          libvorbis-dev \
-          libgl1-mesa-dev \
-          libegl1-mesa-dev \
-          libfreetype6-dev \
-          libx11-dev
-      
+        sudo apt-get install -y libxrandr-dev libxcursor-dev libudev-dev libopenal-dev libflac-dev libvorbis-dev libgl1-mesa-dev libegl1-mesa-dev libfreetype6-dev libx11-dev
+
+    # --- MAC DEPENDENCIES (The Nuclear Option) ---
+    - name: Install Mac Deps (VCPKG)
+      if: runner.os == 'macOS'
+      run: |
+        # Install SFML Statically using VCPKG
+        # This compiles Freetype from source as a .a library, eliminating the Framework issue.
+        vcpkg install sfml:x64-osx-static
+
     # --- CONFIGURE CMAKE ---
     - name: Configure CMake
-      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      run: |
+        if [ "$RUNNER_OS" == "macOS" ]; then
+          # On Mac, tell CMake to use the VCPKG toolchain
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_TARGET_TRIPLET=x64-osx-static
+        else
+          # Linux/Windows use default settings
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        fi
+      shell: bash
 
     # --- BUILD ---
     - name: Build
       run: cmake --build build --config Release
-
-    # --- RENAME MAC FILE (.so -> .dylib) ---
-    # Your CMakeLists.txt forces ".so" on Apple. We fix that here for distribution.
-    - name: Rename Mac Library
-      if: runner.os == 'macOS'
-      run: mv build/libChessLib.so build/libChessLib.dylib
 
     # --- UPLOAD ARTIFACTS ---
     - name: Upload Library
