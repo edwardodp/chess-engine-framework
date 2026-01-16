@@ -35,8 +35,7 @@ jobs:
     - name: Configure CMake
       run: |
         if [ "$RUNNER_OS" == "macOS" ]; then
-          # Force Intel (x86_64) build for max compatibility
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
         else
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
         fi
