@@ -44,6 +44,8 @@ target_link_libraries(ChessExe PRIVATE sfml-graphics sfml-system sfml-window ImG
 foreach(TARGET ChessLib ChessExe)
     if(MSVC)
         target_compile_options(${TARGET} PUBLIC /constexpr:steps 1000000 /O2)
+    elseif(APPLE)
+        target_compile_options(${TARGET} PUBLIC -O3)
     else()
         target_compile_options(${TARGET} PUBLIC -O3 -march=native)
     endif()
