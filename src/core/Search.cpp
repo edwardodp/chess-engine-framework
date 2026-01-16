@@ -29,14 +29,13 @@ namespace Search {
                 return i;
             }
         }
-        return 0; // Fallback
+        return 0;
     }
 
     int score_move(const Move& m, const BoardState& board) {
         if (m.is_capture()) {
             int attacker = get_piece_type(board, m.from());
             
-            // For En Passant, victim is Pawn (0)
             int victim = 0; 
             if (m.flag() != MoveFlag::EnPassant) {
                 victim = get_piece_type(board, m.to());
@@ -47,15 +46,14 @@ namespace Search {
             return 10000 + mvv_lva[victim][attacker];
         }
         
-        // Promotion (non-capture) bias
         if (m.is_promotion()) {
-            return 9000; // Check promotions right after captures
+            return 9000;
         }
 
         return 0;
     }
 
-    // --- QUIESCENCE SEARCH ---
+    // --- Quiescence Search ---
     int32_t quiescence(BoardState& board, int32_t alpha, int32_t beta, EvalCallback eval, uint32_t moves_played) {
         // 1. Stand Pat
         int32_t stand_pat = eval(board.pieces.data(), board.occupancy.data(), (board.to_move == Colour::White ? 0 : 1));
@@ -91,7 +89,7 @@ namespace Search {
         return alpha;
     }
 
-    // --- MAIN SEARCH ---
+    // --- Main Search ---
     int32_t alpha_beta(BoardState& board, int depth, int32_t alpha, int32_t beta, EvalCallback eval, uint32_t moves_played) {
         if (depth == 0) {
             return quiescence(board, alpha, beta, eval, moves_played);
@@ -190,7 +188,7 @@ namespace Search {
                 stats.score = best_score;
                 stats.best_move_raw = best_move.raw();
                 
-                std::cout << "Info: Depth " << d << " Score: " << best_score << std::endl;
+                // std::cout << "Info: Depth " << d << " Score: " << best_score << std::endl;
             }
         }
         return best_move;

@@ -64,13 +64,11 @@ def main():
         print(f"[Error] Failed to load library: {e}")
         sys.exit(1)
 
-    # Define C function signature
     chess_lib.startEngine.argtypes = [ctypes.c_void_p, ctypes.c_int]
     
     print(f"--- Chess Engine Interface Loaded ---")
     print(f"Library: {lib_name}")
     
-    # Get the memory address of the compiled wrapper
     engine_callback = evaluation_wrapper.address
 
     print(f"Starting Engine at Depth {COMPETITION_DEPTH}...")
