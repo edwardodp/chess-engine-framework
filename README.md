@@ -27,7 +27,7 @@ Firstly you will need to setup your python virtual environment. Make sure you ar
 3. Install the necessary packages `pip install -r requirements.txt`
 
 ### Windows Powershell
-1. Create the virtual environment in the root of this project `python -m venv .venv` or `py -m venv .venv`
+1. Create the virtual environment in the root of this project `py -m venv .venv`
 2. Activate the environment `.venv\Scripts\Activate.ps1`
 3. Install the necessary packages `pip install -r requirements.txt`
 
