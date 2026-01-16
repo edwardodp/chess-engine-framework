@@ -1,11 +1,13 @@
 cmake_minimum_required(VERSION 3.15)
 project(ChessEngine LANGUAGES CXX)
 
+# --- 1. GLOBAL SETTINGS ---
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(SFML_STATIC_LIBRARIES ON CACHE BOOL "" FORCE)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 if(APPLE)
+    set(CMAKE_FIND_FRAMEWORK NEVER CACHE STRING "" FORCE)
     set(SFML_OSX_USE_FRAMEWORKS OFF CACHE BOOL "" FORCE)
 endif()
 
@@ -34,7 +36,6 @@ set(MAIN_API_SOURCE src/Main.cpp)
 add_library(ChessLib SHARED ${CORE_SOURCES} ${MAIN_API_SOURCE})
 target_include_directories(ChessLib PUBLIC include)
 target_compile_definitions(ChessLib PRIVATE BUILD_AS_LIBRARY)
-
 target_link_libraries(ChessLib PRIVATE sfml-graphics sfml-system sfml-window ImGui-SFML::ImGui-SFML)
 
 add_executable(ChessExe ${MAIN_API_SOURCE} ${CORE_SOURCES})

@@ -1,5 +1,6 @@
 import sys
 import os
+import platform
 import ctypes
 import numpy as np
 from numba import cfunc, types, carray
@@ -28,16 +29,26 @@ def evaluation_wrapper(board_pieces_ptr, board_occupancy_ptr, side_to_move):
 def main():
     curr_dir = os.path.dirname(os.path.abspath(__file__))
     bindings_dir = os.path.join(curr_dir, "..", "bindings")
+
+    system = sys.platform
+    machine = platform.machine().lower()
     
-    if sys.platform == "win32":
+    if system == "win32":
         lib_name = "ChessLib.dll"
-    elif sys.platform == "darwin":
-        if os.path.exists(os.path.join(bindings_dir, "libChessLib.dylib")):
-            lib_name = "libChessLib.dylib"
-        else:
-            lib_name = "libChessLib.so"
-    else: # Linux
+    elif system == "linux":
         lib_name = "libChessLib.so"
+    elif system == "darwin":
+        if "arm64" in machine:
+            lib_name = "libChessLib_arm64.dylib"
+        else:
+            lib_name = "libChessLib_intel.dylib"
+            
+        if not os.path.exists(os.path.join(bindings_dir, lib_name)):
+             if os.path.exists(os.path.join(bindings_dir, "libChessLib.dylib")):
+                 lib_name = "libChessLib.dylib"
+    else:
+        print(f"[Error] Unsupported OS: {system}")
+        sys.exit(1)
         
     lib_path = os.path.join(curr_dir, "..", "bindings", lib_name)
     lib_path = os.path.abspath(lib_path)

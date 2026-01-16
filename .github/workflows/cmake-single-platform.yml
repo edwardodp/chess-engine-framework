@@ -4,48 +4,51 @@ on: [push, pull_request]
 
 jobs:
   build:
-    name: Build on ${{ matrix.os }}
-    # We use 'macos-15' (which supports Intel/x86_64) as per your logs
+    name: Build ${{ matrix.output_file }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
+          # Linux
           - os: ubuntu-latest
             output_file: libChessLib.so
+            
+          # Windows
           - os: windows-latest
             output_file: ChessLib.dll
-          - os: macos-15
-            output_file: libChessLib.dylib
+            
+          # Mac - Apple Silicon (M1/M2/M3)
+          - os: macos-latest
+            output_file: libChessLib_arm64.dylib
+            
+          # Mac - Intel
+          - os: macos-15  # Explicitly use the Intel runner
+            output_file: libChessLib_intel.dylib
 
     steps:
     - uses: actions/checkout@v4
 
-    # --- LINUX DEPENDENCIES ---
+    # --- LINUX SETUP ---
     - name: Install Linux Deps
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
         sudo apt-get install -y libxrandr-dev libxcursor-dev libudev-dev libopenal-dev libflac-dev libvorbis-dev libgl1-mesa-dev libegl1-mesa-dev libfreetype6-dev libx11-dev
 
-    # --- MAC DEPENDENCIES ---
-    # We do NOT use vcpkg anymore. SFML's FetchContent will handle it.
-    # Standard Xcode tools (already on the runner) are enough.
-
-    # --- CONFIGURE CMAKE ---
-    - name: Configure CMake
-      run: |
-        if [ "$RUNNER_OS" == "macOS" ]; then
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release "-DCMAKE_OSX_ARCHITECTURES=x86_64;arm64"
-        else
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-        fi
-      shell: bash
-
     # --- BUILD ---
+    - name: Configure CMake
+      run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
     - name: Build
       run: cmake --build build --config Release
 
-    # --- UPLOAD ARTIFACTS ---
+    # --- RENAME (Mac Only) ---
+    # Since CMake outputs "libChessLib.dylib" by default, we rename it to match the matrix
+    - name: Rename Mac Binary
+      if: runner.os == 'macOS'
+      run: mv build/libChessLib.dylib build/${{ matrix.output_file }}
+
+    # --- UPLOAD ---
     - name: Upload Library
       uses: actions/upload-artifact@v4
       with:
