@@ -10,10 +10,31 @@ The competition will run in 2 parts. The first part is development. This is when
 ---
 
 ## File Structure
+```
+app
+│   board_tools.py (helper functions)
+│   evaluation.py (your code goes here)
+│   main.py (DO NOT EDIT)
+|   tests.py 
+```
 ---
 ## How to run
----
-## Testing
+Firstly you will need to setup your python virtual environment. Make sure you are always working in your python virtual environment.
+
+### Linux/macOS
+1. Create the virtual environment in the root of this project `python3 -m venv .venv`
+2. Activate the environment `source .venv/bin/activate`
+3. Install the necessary packages `pip install -r requirements.txt`
+
+### Windows Powershell
+1. Create the virtual environment in the root of this project `python -m venv .venv` or `py -m venv .venv`
+2. Activate the environment `.venv\Scripts\Activate.ps1`
+3. Install the necessary packages `pip install -r requirements.txt`
+
+Once set up, simply run `python app/main.py`
+
+To run tests, run `python app/tests.py`
+
 ---
 ## Restrictions
 ---
