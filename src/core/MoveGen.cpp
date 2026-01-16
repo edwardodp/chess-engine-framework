@@ -39,43 +39,33 @@ void generate_moves(const BoardState& board, std::vector<Move>& move_list) {
     // --- Pawns ---
     Bitboard pawns = board.pieces[(us == Colour::White) ? 0 : 6];
     
-    // Define the Promotion Rank mask
     Bitboard promo_rank = (us == Colour::White) ? 0xFF00000000000000ULL : 0x00000000000000FFULL;
 
-    // 1. Single Push
     Bitboard single_push = (us == Colour::White) ? (pawns << 8) : (pawns >> 8);
     single_push &= ~all_occ; // Must be empty
 
-    // Split pushes into Promotions vs Quiet
     Bitboard quiet_pushes = single_push & ~promo_rank;
     Bitboard promo_pushes = single_push & promo_rank;
 
-    // A. Quiet Pushes
     while (quiet_pushes) {
         Square to = BitUtil::pop_lsb(quiet_pushes);
         Square from = static_cast<Square>(static_cast<int>(to) + ((us == Colour::White) ? -8 : 8));
         move_list.emplace_back(from, to, MoveFlag::Quiet);
     }
 
-    // B. Promotion Pushes
     while (promo_pushes) {
         Square to = BitUtil::pop_lsb(promo_pushes);
         Square from = static_cast<Square>(static_cast<int>(to) + ((us == Colour::White) ? -8 : 8));
-        // Add all 4 promotion options
         add_promotions(from, to, move_list, false); 
     }
 
-    // 2. Double Push
     // Can only happen if the single push land was valid AND we are on start rank
     Bitboard single_push_valid = single_push; 
-    // Filter for start ranks (Rank 3 for White, Rank 6 for Black target)
     Bitboard double_push_target = (us == Colour::White) ? 0x00000000FF000000ULL : 0x000000FF00000000ULL; 
     
-    // Actually simpler: Mask the *source* pawns on Rank 2/7, shift 16, check empty.
-    // But re-using single_push is faster:
     Bitboard double_push = (us == Colour::White) ? (single_push << 8) : (single_push >> 8);
     
-    // Mask to ensure we are on the correct rank (4 for White, 5 for Black)
+    // Mask to ensure we are on the correct rank
     Bitboard rank_4_5 = (us == Colour::White) ? 0x00000000FF000000ULL : 0x000000FF00000000ULL;
     double_push &= rank_4_5;
     double_push &= ~all_occ;
@@ -86,7 +76,7 @@ void generate_moves(const BoardState& board, std::vector<Move>& move_list) {
         move_list.emplace_back(from, to, MoveFlag::DoublePawnPush);
     }
 
-    // 3. Captures
+    // Captures
     Bitboard pawns_copy = pawns;
     while(pawns_copy) {
         Square from = BitUtil::pop_lsb(pawns_copy);
@@ -95,14 +85,11 @@ void generate_moves(const BoardState& board, std::vector<Move>& move_list) {
         
         Bitboard valid_captures = attacks & them_occ;
 
-        // Split Captures into Promotions vs Normal
         Bitboard normal_captures = valid_captures & ~promo_rank;
         Bitboard promo_captures  = valid_captures & promo_rank;
 
-        // Normal Captures
         serialize_moves(from, normal_captures, move_list, MoveFlag::Capture);
 
-        // Promotion Captures
         while (promo_captures) {
             Square to = BitUtil::pop_lsb(promo_captures);
             add_promotions(from, to, move_list, true);
@@ -200,11 +187,10 @@ void generate_captures(const BoardState& board, std::vector<Move>& move_list) {
     Bitboard them_occ = board.occupancy[static_cast<int>(them)];
     Bitboard all_occ = board.occupancy[2];
 
-    // --- PAWNS ---
+    // --- Pawns ---
     Bitboard pawns = board.pieces[(us == Colour::White) ? 0 : 6];
     Bitboard promo_rank = (us == Colour::White) ? 0xFF00000000000000ULL : 0x00000000000000FFULL;
 
-    // 1. Single Push Promotions ONLY (Quiet pushes are ignored unless they promote)
     Bitboard single_push = (us == Colour::White) ? (pawns << 8) : (pawns >> 8);
     single_push &= ~all_occ; 
     Bitboard promo_pushes = single_push & promo_rank;
@@ -215,7 +201,6 @@ void generate_captures(const BoardState& board, std::vector<Move>& move_list) {
         add_promotions(from, to, move_list, false);
     }
 
-    // 2. Captures (Normal + Promo)
     Bitboard pawns_copy = pawns;
     while(pawns_copy) {
         Square from = BitUtil::pop_lsb(pawns_copy);
@@ -242,7 +227,7 @@ void generate_captures(const BoardState& board, std::vector<Move>& move_list) {
         }
     }
 
-    // --- KNIGHTS ---
+    // --- Knights ---
     Bitboard knights = board.pieces[(us == Colour::White) ? 1 : 7];
     while (knights) {
         Square from = BitUtil::pop_lsb(knights);
@@ -250,7 +235,7 @@ void generate_captures(const BoardState& board, std::vector<Move>& move_list) {
         serialize_moves(from, moves & them_occ, move_list, MoveFlag::Capture);
     }
 
-    // --- KING ---
+    // --- King ---
     Bitboard king = board.pieces[(us == Colour::White) ? 5 : 11];
     if (king) {
         Square from = static_cast<Square>(BitUtil::lsb(king));
@@ -258,9 +243,7 @@ void generate_captures(const BoardState& board, std::vector<Move>& move_list) {
         serialize_moves(from, moves & them_occ, move_list, MoveFlag::Capture);
     }
 
-    // --- SLIDERS (Bishops, Rooks, Queens) ---
-    // Optimization: Only generate attacks, then mask with 'them_occ' immediately
-    
+    // --- Sliders (Bishops, Rooks, Queens) ---
     Bitboard bishops = board.pieces[(us == Colour::White) ? 2 : 8];
     while (bishops) {
         Square from = BitUtil::pop_lsb(bishops);

@@ -8,7 +8,6 @@ extern "C" {
     #ifdef _WIN32
     __declspec(dllexport)
     #endif
-    // When Python calls this, it opens the Window!
     void startEngine(EvalCallback evalFunc, int depth) {
         std::cout << "Starting GUI from Shared Library..." << std::endl;
         GUI::Launch(evalFunc, depth);

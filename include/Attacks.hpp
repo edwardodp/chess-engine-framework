@@ -21,7 +21,7 @@ namespace Attacks {
 
     void init();
 
-    // Magic Lookups (Implementation in cpp)
+    // Magic Lookups
     uint64_t get_rook_attacks(int sq, uint64_t occ);
     uint64_t get_bishop_attacks(int sq, uint64_t occ);
     inline uint64_t get_queen_attacks(int sq, uint64_t occ) {

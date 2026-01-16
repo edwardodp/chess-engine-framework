@@ -1,23 +1,11 @@
 #include "Evaluation.hpp"
 #include "BitUtil.hpp"
 #include "BoardState.hpp"
-#include "MoveGen.hpp"
-#include "Attacks.hpp"
 #include "Types.hpp"
-#include "Search.hpp"
-#include <vector>
-#include <algorithm>
 
 namespace Evaluation {
 
     // --- 1. PEICE-SQUARE TABLES (PeSTO) ---
-    // These tables give a bonus (or penalty) for every square on the board.
-    // We have two values for every square: Middle Game (MG) and End Game (EG).
-    // The engine blends these based on how many pieces are left.
-
-    // Bonus tables are defined for WHITE. Black mirrors them.
-    // Format: { MG, EG } for A1...H8
-    
     // Pawn: Encourages pushing center pawns, punishing backward pawns
     const int val_pawn[64][2] = {
         { 0, 0}, { 0, 0}, { 0, 0}, { 0, 0}, { 0, 0}, { 0, 0}, { 0, 0}, { 0, 0},
@@ -170,21 +158,13 @@ namespace Evaluation {
             }
         }
 
-        // --- TAPERING ---
+        // --- Tapering ---
         if (game_phase > 24) game_phase = 24;
         
         int mg_score = mg[0] - mg[1];
         int eg_score = eg[0] - eg[1];
         
         int32_t final_score = (mg_score * game_phase + eg_score * (24 - game_phase)) / 24;
-
-        // IMPORTANT: Return score relative to the side to move?
-        // Standard engine convention: Always return relative to "Side to move".
-        // BUT your Search.cpp logic (NegaMax) might expect absolute "White - Black".
-        // Let's look at your Search.cpp:
-        // You use: int32_t score = -alpha_beta(...);
-        // This implies NegaMax. NegaMax requires the evaluation to be "Score from MY perspective".
-        
         // If sideToMove == 0 (White), return (White - Black).
         // If sideToMove == 1 (Black), return (Black - White) -> which is -(White - Black).
         

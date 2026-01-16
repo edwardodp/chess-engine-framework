@@ -1,8 +1,6 @@
 #include "Attacks.hpp"
 #include "BitUtil.hpp"
 #include <vector>
-#include <random>
-#include <iostream>
 #include <cassert>
 
 namespace Attacks {
@@ -17,7 +15,7 @@ std::array<Bitboard, 102400> RookTable;
 std::array<Bitboard, 5248>   BishopTable;
 
 namespace {
-    // Improved Random Number Generator (Xorshift)
+    // Improved pseudo-RNG (Xorshift)
     uint64_t random_state = 1804289383;
 
     uint64_t get_random_u64() {
@@ -101,7 +99,6 @@ void find_magics(bool rook, std::array<Magic, 64>& magics, uint64_t* table_start
                               : slow_bishop_attacks(sq, occupancies[i]);
         }
 
-        // Try until we find a magic number (Guaranteed to succeed eventually)
         while (true) {
             Bitboard magic_candidate = get_random_u64_sparse();
             if (BitUtil::count_bits((mask * magic_candidate) & 0xFF00000000000000ULL) < 6) continue;
@@ -109,18 +106,12 @@ void find_magics(bool rook, std::array<Magic, 64>& magics, uint64_t* table_start
             int shift = 64 - bits;
             bool collision = false;
             
-            // Wipe table section to be safe
-            // (Strictly speaking not needed if we check properly, but safer for debugging)
-            // for (int i=0; i<permutations; ++i) table_start[current_offset + i] = 0; 
-            // ^ Optimization: Don't wipe, just rely on the collision check below.
-            
-            // Verify candidate
-            std::vector<int> used(permutations, -1); // Simple collision map
+            std::vector<int> used(permutations, -1);
             
             for (int i = 0; i < permutations; ++i) {
                 size_t idx = ((occupancies[i] & mask) * magic_candidate) >> shift;
                 
-                // If this index was visited by a different attack set -> Collision!
+                // If this index was visited by a different attack set -> collision
                 if (used[idx] != -1 && used[idx] != i && attacks[used[idx]] != attacks[i]) {
                     collision = true; 
                     break;
@@ -129,7 +120,6 @@ void find_magics(bool rook, std::array<Magic, 64>& magics, uint64_t* table_start
             }
 
             if (!collision) {
-                // Found one! Populate the real table
                 for (int i = 0; i < permutations; ++i) {
                     size_t idx = ((occupancies[i] & mask) * magic_candidate) >> shift;
                     table_start[current_offset + idx] = attacks[i];
@@ -137,7 +127,7 @@ void find_magics(bool rook, std::array<Magic, 64>& magics, uint64_t* table_start
 
                 magics[sq] = { mask, magic_candidate, current_offset, (uint32_t)shift };
                 current_offset += permutations;
-                break; // Move to next square
+                break;
             }
         }
     }

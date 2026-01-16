@@ -125,8 +125,6 @@ struct BoardState {
         }
 
         // Update Castle Rights
-        // Simple mask approach: if king/rook moves from/to source spots, strip rights
-        // (A robust engine has a lookup table for this, but manual checks work for now)
         if (from == Square::E1 || to == Square::E1) castle_rights &= ~3;
         if (from == Square::E8 || to == Square::E8) castle_rights &= ~12;
         if (from == Square::H1 || to == Square::H1) castle_rights &= ~1;
@@ -163,9 +161,8 @@ struct BoardState {
         int us = static_cast<int>(to_move);
         int them = us ^ 1;
 
-        // 1. Move the piece back
+        // Move the piece back
         int piece_idx = -1;
-        // Determine what piece is currently on 'to' (handling promotion cases)
         for (int i = us * 6; i < us * 6 + 6; ++i) {
             if (BitUtil::get_bit(pieces[i], to)) {
                 piece_idx = i;
@@ -174,7 +171,6 @@ struct BoardState {
             }
         }
         
-        // If promotion, we just removed the Queen/Rook/etc. Now put the pawn back at 'from'.
         if (flag >= MoveFlag::KnightPromotion) {
             BitUtil::set_bit(pieces[us * 6], from);
         } else {
@@ -184,22 +180,18 @@ struct BoardState {
         BitUtil::clear_bit(occupancy[us], to);
         BitUtil::set_bit(occupancy[us], from);
 
-        // 2. Restore captured piece
         if (h.captured_piece) {
-            int cap_idx = BitUtil::lsb(h.captured_piece); // This is the piece TYPE index (0-11)
-            // Wait, h.captured_piece stores (1ULL << index), so lsb gives index
+            int cap_idx = BitUtil::lsb(h.captured_piece);
             BitUtil::set_bit(pieces[cap_idx], to);
             BitUtil::set_bit(occupancy[them], to);
         }
 
-        // 3. En Passant Special Case
         if (flag == MoveFlag::EnPassant) {
             Square cap_sq = static_cast<Square>(static_cast<int>(to) + (us == 0 ? -8 : 8));
             BitUtil::set_bit(pieces[them * 6], cap_sq);
             BitUtil::set_bit(occupancy[them], cap_sq);
         }
 
-        // 4. Castling Unmake
         if (flag == MoveFlag::KingCastle) {
             Square r_from = (us == 0) ? Square::H1 : Square::H8;
             Square r_to = (us == 0) ? Square::F1 : Square::F8;
@@ -216,7 +208,6 @@ struct BoardState {
             BitUtil::set_bit(occupancy[us], r_from);
         }
 
-        // Rebuild All Occupancy
         occupancy[2] = occupancy[0] | occupancy[1];
     }
 };

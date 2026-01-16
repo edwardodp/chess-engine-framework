@@ -122,7 +122,7 @@ namespace Search {
             int32_t score = -alpha_beta(board, depth - 1, -beta, -alpha, eval, moves_played + 1);
             board.undo_move(move);
 
-            if (score >= beta) return beta; // Cutoff
+            if (score >= beta) return beta;
             if (score > alpha) {
                 alpha = score;
             }
@@ -186,7 +186,6 @@ namespace Search {
             if (current_best_move.raw() != 0) {
                 best_move = current_best_move;
                 
-                // UPDATE STATS FOR GUI
                 stats.depth_reached = d;
                 stats.score = best_score;
                 stats.best_move_raw = best_move.raw();
