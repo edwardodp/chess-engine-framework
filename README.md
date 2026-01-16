@@ -19,8 +19,8 @@ app/
 │   main.py             (DO NOT EDIT)
 │   evaluation.py       (your code goes here)
 │   board_tools.py      (helper functions)
-bindings/
-│   (.dll, .so, or .dylib file goes here)
+bindings/               (make this directory)
+│   (.dll, .so, or .dylib file from releases goes here)
 ```
 ---
 ## How to run
