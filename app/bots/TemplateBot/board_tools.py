@@ -62,5 +62,3 @@ def count_bits(bitboard):
         bitboard &= bitboard - 1
         count += 1
     return count
-
-popcount = count_bits

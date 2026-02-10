@@ -54,23 +54,34 @@ namespace Search {
     }
 
     // --- Quiescence Search ---
-    int32_t quiescence(BoardState& board, int32_t alpha, int32_t beta, EvalCallback eval, uint32_t moves_played) {
+    static constexpr int QS_MAX_DEPTH = 8;      // Hard cap on quiescence depth
+    static constexpr int DELTA_MARGIN  = 900;    // Biggest material swing (queen capture)
+
+    int32_t quiescence(BoardState& board, int32_t alpha, int32_t beta, EvalCallback eval, uint32_t moves_played, int qs_depth) {
         // 1. Stand Pat
         int32_t stand_pat = eval(board.pieces.data(), board.occupancy.data(), (board.to_move == Colour::White ? 0 : 1));
         if (stand_pat >= beta) return beta;
         if (stand_pat > alpha) alpha = stand_pat;
 
-        // 2. Generate Captures
+        // 2. Hard depth limit — return static eval if we've searched too deep
+        if (qs_depth >= QS_MAX_DEPTH) return alpha;
+
+        // 3. Generate Captures
         std::vector<Move> moves;
         moves.reserve(32); 
         MoveGen::generate_captures(board, moves);
 
-        // 3. Fast Sort (MVV-LVA)
+        // 4. Fast Sort (MVV-LVA)
         std::sort(moves.begin(), moves.end(), [&](const Move& a, const Move& b) {
             return score_move(a, board) > score_move(b, board);
         });
 
         for (const auto& move : moves) {
+            // 5. Delta Pruning — if even capturing a queen can't raise us to alpha, skip
+            if (!move.is_promotion() && stand_pat + DELTA_MARGIN < alpha) {
+                break;  // Moves are sorted best-first, so if this fails they all will
+            }
+
             board.make_move(move);
             
             Colour us = (board.to_move == Colour::White) ? Colour::Black : Colour::White;
@@ -80,7 +91,7 @@ namespace Search {
                 continue;
             }
 
-            int32_t score = -quiescence(board, -beta, -alpha, eval, moves_played + 1);
+            int32_t score = -quiescence(board, -beta, -alpha, eval, moves_played + 1, qs_depth + 1);
             board.undo_move(move);
 
             if (score >= beta) return beta;
@@ -91,8 +102,12 @@ namespace Search {
 
     // --- Main Search ---
     int32_t alpha_beta(BoardState& board, int depth, int32_t alpha, int32_t beta, EvalCallback eval, uint32_t moves_played) {
+        if (moves_played > 0 && board.is_draw()) {
+            return 0;
+        }
+
         if (depth == 0) {
-            return quiescence(board, alpha, beta, eval, moves_played);
+            return quiescence(board, alpha, beta, eval, moves_played, 0);
         }
 
         std::vector<Move> moves;
