@@ -10,10 +10,10 @@ import numpy as np
 # -----------------------------------------------------------
 # CONFIGURATION
 # -----------------------------------------------------------
-COMPETITION_DEPTH = 4
+COMPETITION_DEPTH = 5
 LOADED_BOTS_CACHE = {}
 
-# C callback type: int32_t (*)(const uint64_t*, const uint64_t*, uint32_t)
+# ctypes fallback type (only used if @cfunc fails)
 EVAL_FUNC_TYPE = ctypes.CFUNCTYPE(
     ctypes.c_int32,
     ctypes.POINTER(ctypes.c_uint64),
@@ -22,18 +22,46 @@ EVAL_FUNC_TYPE = ctypes.CFUNCTYPE(
 )
 
 class CallbackWrapper:
-    """Holds both the ctypes callback object (preventing GC) and its address."""
+    """Holds a native callback and its address. Works with both @cfunc and ctypes."""
     def __init__(self, cb):
-        self._cb = cb                                       # prevent garbage collection
-        self.address = ctypes.cast(cb, ctypes.c_void_p).value
+        self._cb = cb  # prevent garbage collection
+        if hasattr(cb, 'address'):
+            # Numba @cfunc object — already a native pointer
+            self.address = cb.address
+        else:
+            # ctypes function pointer
+            self.address = ctypes.cast(cb, ctypes.c_void_p).value
 
 # -----------------------------------------------------------
-# DUMMY EVAL
+# DUMMY EVAL (native via @cfunc)
 # -----------------------------------------------------------
-def _dummy_eval(pieces_ptr, occupancy_ptr, side):
+from numba import cfunc, types, carray
+
+_c_sig = types.int32(types.CPointer(types.uint64), types.CPointer(types.uint64), types.uint32)
+
+@cfunc(_c_sig)
+def _dummy_cfunc(pieces_ptr, occupancy_ptr, side):
     return 0
 
-dummy_wrapper = CallbackWrapper(EVAL_FUNC_TYPE(_dummy_eval))
+dummy_wrapper = CallbackWrapper(_dummy_cfunc)
+
+# -----------------------------------------------------------
+# @cfunc wrapper source — exec'd inside each bot's module
+# namespace so evaluation_function is a module-level name,
+# NOT a closure capture. This compiles to a direct native call.
+# -----------------------------------------------------------
+_CFUNC_WRAPPER_SOURCE = """
+from numba import cfunc, types, carray
+import numpy as np
+
+_c_sig = types.int32(types.CPointer(types.uint64), types.CPointer(types.uint64), types.uint32)
+
+@cfunc(_c_sig)
+def _native_eval_wrapper(pieces_ptr, occupancy_ptr, side):
+    pieces = carray(pieces_ptr, (12,), dtype=np.uint64).astype(np.int64)
+    occupancy = carray(occupancy_ptr, (3,), dtype=np.uint64).astype(np.int64)
+    return evaluation_function(pieces, occupancy, side)
+"""
 
 # -----------------------------------------------------------
 # BOT LOADING
@@ -72,13 +100,22 @@ def load_bot_safely(bot_name, bot_path):
         if "evaluation" in local_modules:
             eval_mod = local_modules["evaluation"]
             if hasattr(eval_mod, "evaluation_function"):
-                real_eval_func = eval_mod.evaluation_function
                 
+                # --- FAST PATH: compile @cfunc in the bot's own namespace ---
+                try:
+                    exec(_CFUNC_WRAPPER_SOURCE, eval_mod.__dict__)
+                    native_cb = eval_mod.__dict__['_native_eval_wrapper']
+                    cb = CallbackWrapper(native_cb)
+                    LOADED_BOTS_CACHE[bot_path] = cb
+                    print(f"  -> Success (native @cfunc). Address: {hex(cb.address)}")
+                    return cb
+                except Exception as e:
+                    print(f"  -> @cfunc failed ({e}), falling back to ctypes...")
+
+                # --- SLOW FALLBACK: ctypes wrapper (for non-@njit eval functions) ---
+                real_eval_func = eval_mod.evaluation_function
                 def make_wrapper(fn):
-                    """Create a ctypes callback that reliably closes over fn."""
                     def wrapper(pieces_ptr, occupancy_ptr, side):
-                        # Convert raw C pointers to numpy arrays, cast to int64
-                        # to match what Numba @njit bot functions expect
                         pieces = np.ctypeslib.as_array(pieces_ptr, shape=(12,)).astype(np.int64)
                         occupancy = np.ctypeslib.as_array(occupancy_ptr, shape=(3,)).astype(np.int64)
                         return int(fn(pieces, occupancy, np.int32(side)))
@@ -86,7 +123,7 @@ def load_bot_safely(bot_name, bot_path):
                 
                 cb = make_wrapper(real_eval_func)
                 LOADED_BOTS_CACHE[bot_path] = cb
-                print(f"  -> Success. Address: {hex(cb.address)}")
+                print(f"  -> Success (ctypes fallback). Address: {hex(cb.address)}")
                 return cb
             else:
                 print(f"  -> Error: missing 'evaluation_function'")
