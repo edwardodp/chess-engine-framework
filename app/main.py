@@ -13,7 +13,7 @@ import time
 # CONFIGURATION
 # -----------------------------------------------------------
 COMPETITION_DEPTH = 5
-MAX_MOVES_PER_GAME = 200
+MAX_MOVES_PER_GAME = 600
 LOADED_BOTS_CACHE = {}
 
 # 4 balanced openings — replace with Stockfish-verified FENs later
@@ -91,17 +91,24 @@ def load_bot_safely(bot_name, bot_path):
         for filepath in py_files:
             filename = os.path.basename(filepath)
             module_short_name = filename.replace(".py", "")
-            unique_name = f"{bot_name}_{module_short_name}"
 
-            spec = importlib.util.spec_from_file_location(unique_name, filepath)
+            # Use the SHORT name (e.g. "evaluation") not the unique name
+            # (e.g. "ZiadFakhoury_evaluation") for the spec.  This sets
+            # module.__name__ to the short name, which lets Numba's
+            # internal find_spec() locate the real .py file on sys.path.
+            # Using a unique name causes find_spec("ZiadFakhoury_evaluation")
+            # which fails because no such file exists.
+            spec = importlib.util.spec_from_file_location(module_short_name, filepath)
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
-                sys.modules[unique_name] = module
+                sys.modules[module_short_name] = module
                 try:
                     spec.loader.exec_module(module)
                     local_modules[module_short_name] = module
                 except Exception as e:
                     print(f"  -> Warning: Failed to load {filename}: {e}")
+                    if sys.modules.get(module_short_name) is module:
+                        del sys.modules[module_short_name]
 
         for name, mod in local_modules.items(): sys.modules[name] = mod
 

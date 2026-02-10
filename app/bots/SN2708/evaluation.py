@@ -355,10 +355,6 @@ ISOLATED       = np.array([5, 15], dtype=np.int32)
 PASSED         = np.array([20, 60], dtype=np.int32)  
 
 
-
-@njit(int32(int64[:], int64[:], uint32))
-
-
 @njit
 def _bitscan(bb):
     """Extract square index from a single-bit bitboard (LSB)."""

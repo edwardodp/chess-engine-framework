@@ -1,4 +1,3 @@
-import json
 import math
 import os
 import numpy as np
@@ -42,7 +41,7 @@ BASELINE_BISHOP = np.float32(_z["baseline_bishop_pair"])
 BASELINE_PASSED = _z["baseline_passed"].astype(np.float32)
 BASELINE_PSTS = _z["baseline_piece_psts"].astype(np.float32).reshape(-1)
 
-@njit(cache=True)
+@njit
 def _count_bits_u64(x):
     bb = np.uint64(x)
     cnt = 0
@@ -52,7 +51,7 @@ def _count_bits_u64(x):
     return cnt
 
 
-@njit(cache=True)
+@njit
 def _count_tokens_position(board_pieces):
     n = 0
     for i in range(12):
@@ -60,7 +59,7 @@ def _count_tokens_position(board_pieces):
     return n
 
 
-@njit(cache=True)
+@njit
 def _popcount_u64(x):
     bb = np.uint64(x)
     cnt = 0
@@ -70,22 +69,22 @@ def _popcount_u64(x):
     return cnt
 
 
-@njit(cache=True)
+@njit
 def _file_of(sq):
     return sq % 8
 
 
-@njit(cache=True)
+@njit
 def _rank_of(sq):
     return sq // 8
 
 
-@njit(cache=True)
+@njit
 def _abs_delta(a, b):
     return abs(_file_of(a) - _file_of(b)), abs(_rank_of(a) - _rank_of(b))
 
 
-@njit(cache=True)
+@njit
 def _attacks_xray(piece_type, color, from_sq, to_sq):
     if from_sq == to_sq:
         return False
@@ -110,7 +109,7 @@ def _attacks_xray(piece_type, color, from_sq, to_sq):
     return max(df, dr) == 1
 
 
-@njit(cache=True)
+@njit
 def _encode_position_tokens(board_pieces, max_tokens):
     piece_ids = np.zeros((max_tokens,), dtype=np.int64)
     color_ids = np.zeros((max_tokens,), dtype=np.int64)
@@ -144,7 +143,7 @@ def _encode_position_tokens(board_pieces, max_tokens):
     return piece_ids, color_ids, square_ids, attn_allowed, n
 
 
-@njit(cache=True)
+@njit
 def _linear(x, w):
     t = x.shape[0]
     in_dim = x.shape[1]
@@ -159,7 +158,7 @@ def _linear(x, w):
     return y
 
 
-@njit(cache=True)
+@njit
 def _layer_norm_no_affine(x, eps):
     t = x.shape[0]
     d = x.shape[1]
@@ -180,7 +179,7 @@ def _layer_norm_no_affine(x, eps):
     return y
 
 
-@njit(cache=True)
+@njit
 def _gelu_inplace(x):
     inv_sqrt2 = 0.7071067811865475
     for i in range(x.shape[0]):
@@ -189,7 +188,7 @@ def _gelu_inplace(x):
             x[i, j] = 0.5 * v * (1.0 + math.erf(v * inv_sqrt2))
 
 
-@njit(cache=True)
+@njit
 def _self_attention(x_norm, attn_allowed, wq, wk, wv, wo, num_heads):
     q = _linear(x_norm, wq)
     k = _linear(x_norm, wk)
@@ -233,7 +232,7 @@ def _self_attention(x_norm, attn_allowed, wq, wk, wv, wo, num_heads):
     return _linear(out, wo)
 
 
-@njit(cache=True)
+@njit
 def _forward_position(piece_ids, color_ids, square_ids, attn_allowed, n_tokens):
     x = np.zeros((n_tokens, EMBED_DIM), dtype=np.float32)
     for i in range(n_tokens):
@@ -259,7 +258,7 @@ def _forward_position(piece_ids, color_ids, square_ids, attn_allowed, n_tokens):
     return corr
 
 
-@njit(cache=True)
+@njit
 def _file_pawn_counts(pawn_bb):
     FILE_MASKS = np.array(
         [0x0101010101010101 << f for f in range(8)], dtype=np.uint64
@@ -271,7 +270,7 @@ def _file_pawn_counts(pawn_bb):
     return counts
 
 
-@njit(cache=True)
+@njit
 def _is_passed_pawn(sq, own_is_white, opp_pawns):
     file_idx = sq % 8
     opp = np.uint64(opp_pawns)
@@ -290,7 +289,7 @@ def _is_passed_pawn(sq, own_is_white, opp_pawns):
     return True
 
 
-@njit(cache=True)
+@njit
 def _baseline_feature_vector(board_pieces):
     PIECE_VALUES = np.array([100, 320, 330, 500, 900, 0], dtype=np.int32)
     score_fixed = 0.0
@@ -350,7 +349,7 @@ def _baseline_feature_vector(board_pieces):
     return score_fixed, features
 
 
-@njit(cache=True)
+@njit
 def _baseline_white_score(board_pieces, board_occupancy):
     score_fixed, feat = _baseline_feature_vector(board_pieces)
     s = score_fixed
@@ -365,7 +364,7 @@ def _baseline_white_score(board_pieces, board_occupancy):
     return s
 
 
-@njit(int32(int64[:], int64[:], uint32), cache=True)
+@njit(int32(int64[:], int64[:], uint32))
 def evaluation_function(board_pieces, board_occupancy, side_to_move):
     # Neural-network correction disabled for speed.
     # needed = _count_tokens_position(board_pieces)
