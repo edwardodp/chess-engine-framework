@@ -1,3 +1,33 @@
+# ============================================================================
+# MARKER NOTES — SN2708
+# ============================================================================
+# Strong Stockfish-derived tapered eval with mobility. One of the better
+# submissions.
+#
+# FEATURES IMPLEMENTED:
+#   - Tapered eval with proper phase (N=1, B=1, R=2, Q=4, max 24)
+#   - Stockfish-style PSTs for all pieces (MG + EG), symmetric with [::-1] flip
+#   - Knight mobility: offset-based with file-distance wrap check, counts
+#     squares not blocked by own pieces (Stockfish mobility bonus table, 0-8)
+#   - Bishop mobility: sliding diagonal with proper blocker handling — counts
+#     enemy-occupied squares, stops before own pieces (Stockfish table, 0-13)
+#   - Rook open/semi-open file detection (MG + EG bonuses)
+#   - Pawn structure via bitboards: isolated, doubled, passed pawns using
+#     precomputed file masks and passed pawn masks — efficient implementation
+#   - Stockfish mobility bonus tables for N/B/R/Q (though R and Q mobility
+#     never actually computed — only tables defined)
+#   - King safety weights defined but not used (likely planned feature)
+#
+# ISSUES:
+#   - 64-square get_piece() loop (FIXED by marker → bitboard iteration)
+#   - Rook file detection scanned 8 ranks bit-by-bit instead of using
+#     FILE_MASKS (FIXED by marker → single bitwise AND per pawn color)
+#   - Queen and rook mobility never computed despite tables being defined
+#   - King safety attack system defined (weights, scale) but never implemented
+#   - Bishop mobility uses check_square in inner loop (functional but slower
+#     than bitboard ray attacks)
+# ============================================================================
+
 import board_tools as bt
 from numba import njit, int64, int32, uint32
 import numpy as np
@@ -327,288 +357,313 @@ PASSED         = np.array([20, 60], dtype=np.int32)
 
 
 @njit(int32(int64[:], int64[:], uint32))
+
+
+@njit
+def _bitscan(bb):
+    """Extract square index from a single-bit bitboard (LSB)."""
+    sq = np.int32(0)
+    if bb & np.int64(0xFFFFFFFF00000000): sq += 32; bb >>= 32
+    if bb & np.int64(0x00000000FFFF0000): sq += 16; bb >>= 16
+    if bb & np.int64(0x000000000000FF00): sq += 8;  bb >>= 8
+    if bb & np.int64(0x00000000000000F0): sq += 4;  bb >>= 4
+    if bb & np.int64(0x000000000000000C): sq += 2;  bb >>= 2
+    if bb & np.int64(0x0000000000000002): sq += 1
+    return sq
+
+
+# NOTE (Fixed by marker): Original code iterated all 64 squares using get_piece()
+# (up to 768 bitmask checks per eval call). Rewritten to iterate each piece
+# bitboard directly. Also replaced rook file scanning (8 bit-shift iterations)
+# with single FILE_MASKS AND operations. All evaluation logic and weights unchanged.
+
+@njit(int32(int64[:], int64[:], uint32))
 def evaluation_function(board_pieces, board_occupancy, side_to_move):
-    """
-    Args:
-        board_pieces: Array of 12 bitboards (piece locations) – Do not modify
-        board_occupancy: Array of 3 bitboards (White, Black, All) – Do not modify
-        side_to_move: 0 for White, 1 for Black
-    
-    Returns:
-        int32: The score from the perspective of the side to move
-               (Positive = Current player (side to move) is winning)
-    """
-    
     mg_score = 0
     eg_score = 0
     score = 0
     whiteMaterial = 0
     blackMaterial = 0
-    totalMaterial = 0
     phase = 0
-    WhitePiece = 0
-    BlackPiece = 0
-    
+
     whitePawns = np.uint64(board_pieces[0])
     blackPawns = np.uint64(board_pieces[6])
 
-    # Example: Material value counting
-    for sq in range(64):
-        piece_id = bt.get_piece(board_pieces, sq) # Helper function in `board_tools` (use them)
+    # === WHITE PAWNS ===
+    bb = board_pieces[0]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        file = sq & 7
 
-        WhitePiece = 0
-        BlackPiece = 0
+        whiteMaterial += PAWN_WHITE
+        mg_score += PAWN_MG_WHITE[sq]
+        eg_score += PAWN_EG_WHITE[sq]
+
+        bit = np.uint64(1) << np.uint64(sq)
+
+        if (whitePawns & ADJ_FILE_MASKS[file]) == 0:
+            mg_score -= ISOLATED[0]
+            eg_score -= ISOLATED[1]
+
+        if (whitePawns & (FILE_MASKS[file] & ~bit)) != 0:
+            mg_score -= DOUBLED[0]
+            eg_score -= DOUBLED[1]
+
+        if (blackPawns & PASSED_MASK_WHITE[sq]) == 0:
+            mg_score += PASSED[0]
+            eg_score += PASSED[1]
+
+        bb &= bb - 1
+
+    # === WHITE KNIGHTS ===
+    bb = board_pieces[1]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        file = sq & 7
+
+        whiteMaterial += KNIGHT_WHITE
+        mg_score += KNIGHT_MG_WHITE[sq]
+        eg_score += KNIGHT_EG_WHITE[sq]
+        phase += PHASE_KNIGHT
+
         mobility = 0
-        file = sq % 8
-        rank = sq // 8
+        for offset in (17, 15, 10, 6, -17, -15, -10, -6):
+            to_sq = sq + offset
+            if 0 <= to_sq < 64:
+                to_file = to_sq % 8
+                if abs(to_file - file) <= 2:
+                    if bt.check_square(board_occupancy, to_sq, 0) == 0:
+                        mobility += 1
 
-        
-        # Skip empty squares
-        if piece_id == 0:
-            continue
+        mg_score += MobilityBonus_Knight[mobility][0]
+        eg_score += MobilityBonus_Knight[mobility][1]
 
-        # Add value based on piece ID (constants at top of file; use these too!)
-        if piece_id == bt.WHITE_PAWN:      
-            whiteMaterial += PAWN_WHITE 
-            mg_score += PAWN_MG_WHITE[sq]
-            eg_score += PAWN_EG_WHITE[sq]
+        bb &= bb - 1
 
-            # -------------------------
-            # Fast pawn structure (bitboards)
-            # -------------------------
-            bit = (np.uint64(1) << sq)
+    # === WHITE BISHOPS ===
+    bb = board_pieces[2]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        file = sq & 7
+        rank = sq >> 3
 
-            # Isolated: no friendly pawn on adjacent files
-            if (whitePawns & ADJ_FILE_MASKS[file]) == 0:
-                mg_score -= ISOLATED[0]
-                eg_score -= ISOLATED[1]
+        whiteMaterial += BISHOP_WHITE
+        mg_score += BISHOP_MG_WHITE[sq]
+        eg_score += BISHOP_EG_WHITE[sq]
+        phase += PHASE_BISHOP
 
-            # Doubled: there exists another friendly pawn on same file
-            if (whitePawns & (FILE_MASKS[file] & ~bit)) != 0:
-                mg_score -= DOUBLED[0]
-                eg_score -= DOUBLED[1]
+        mobility = 0
+        for direction in (9, 7, -7, -9):
+            duplicate_sq = sq
+            while True:
+                duplicate_sq += direction
+                if not (0 <= duplicate_sq < 64):
+                    break
+                to_rank = duplicate_sq // 8
+                to_file = duplicate_sq % 8
+                if abs(to_file - file) != abs(to_rank - rank):
+                    break
+                if bt.check_square(board_occupancy, duplicate_sq, 0) != 0:
+                    break
+                mobility += 1
+                if bt.check_square(board_occupancy, duplicate_sq, 2) != 0:
+                    break
 
-            # Passed: no enemy pawn ahead on same/adjacent files
-            if (blackPawns & PASSED_MASK_WHITE[sq]) == 0:
-                mg_score += PASSED[0]
-                eg_score += PASSED[1]
+        if mobility >= len(MobilityBonus_Bishop):
+            mobility = len(MobilityBonus_Bishop) - 1
 
+        mg_score += MobilityBonus_Bishop[mobility][0]
+        eg_score += MobilityBonus_Bishop[mobility][1]
 
+        bb &= bb - 1
 
-        elif piece_id == bt.WHITE_KNIGHT:  
-            whiteMaterial += KNIGHT_WHITE
-            mg_score += KNIGHT_MG_WHITE[sq]
-            eg_score += KNIGHT_EG_WHITE[sq]
-            phase += PHASE_KNIGHT
-            for offset in (17, 15, 10, 6, -17, -15, -10, -6):
-                to_sq = sq + offset
-                if 0 <= to_sq < 64:
-                    to_file = to_sq % 8
-                    if abs(to_file - file) <= 2:
-                        # not occupied by white piece
-                        if bt.check_square(board_occupancy, to_sq, 0) == 0:
-                            mobility += 1
+    # === WHITE ROOKS ===
+    bb = board_pieces[3]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        file = sq & 7
 
-            mg_score += MobilityBonus_Knight[mobility][0]
-            eg_score += MobilityBonus_Knight[mobility][1]
-            
+        whiteMaterial += ROOK_WHITE
+        mg_score += ROOK_MG_WHITE[sq]
+        eg_score += ROOK_EG_WHITE[sq]
+        phase += PHASE_ROOK
 
+        # File status using masks instead of 8-iteration bit scan
+        file_mask = FILE_MASKS[file]
+        has_white_pawn = (whitePawns & file_mask) != np.uint64(0)
+        has_black_pawn = (blackPawns & file_mask) != np.uint64(0)
 
-        elif piece_id == bt.WHITE_BISHOP:  
-            whiteMaterial += BISHOP_WHITE
-            mg_score += BISHOP_MG_WHITE[sq]
-            eg_score += BISHOP_EG_WHITE[sq]
-            phase += PHASE_BISHOP
+        if not has_white_pawn and not has_black_pawn:
+            mg_score += ROOK_MG_OPENFILE
+            eg_score += ROOK_EG_OPENFILE
+        elif not has_white_pawn and has_black_pawn:
+            mg_score += ROOK_MG_SEMIOPENFILE
+            eg_score += ROOK_EG_SEMIOPENFILE
 
-            # Diagonal directions: NE(+9), NW(+7), SE(-7), SW(-9)
-            directions = (9, 7, -7, -9)
-            for i in directions:
-                duplicate_sq = sq
-                while True:
-                    duplicate_sq += i
-                    if not (0 <= duplicate_sq < 64):
-                        break
-                    to_rank = duplicate_sq // 8
-                    to_file = duplicate_sq % 8
+        bb &= bb - 1
 
+    # === WHITE QUEENS ===
+    bb = board_pieces[4]
+    while bb:
+        sq = _bitscan(bb & (-bb))
 
-                    if abs(to_file - file) != abs(to_rank - rank):
-                        break
+        whiteMaterial += QUEEN_WHITE
+        mg_score += QUEEN_MG_WHITE[sq]
+        eg_score += QUEEN_EG_WHITE[sq]
+        phase += PHASE_QUEEN
 
-                    # Stop if blocked by white piece
-                    if bt.check_square(board_occupancy, duplicate_sq, 0) != 0:
-                        break
+        bb &= bb - 1
 
-                    mobility += 1
+    # === WHITE KING ===
+    bb = board_pieces[5]
+    while bb:
+        sq = _bitscan(bb & (-bb))
 
-                    # Stop if blocked by any piece (cannot jump over)
-                    if bt.check_square(board_occupancy, duplicate_sq, 2) != 0:
-                        break
+        whiteMaterial += KING_WHITE
+        mg_score += KING_MG_WHITE[sq]
+        eg_score += KING_EG_WHITE[sq]
 
-            if mobility >= len(MobilityBonus_Bishop):
-                mobility = len(MobilityBonus_Bishop) - 1
+        bb &= bb - 1
 
-            mg_score += MobilityBonus_Bishop[mobility][0]
-            eg_score += MobilityBonus_Bishop[mobility][1]
+    # === BLACK PAWNS ===
+    bb = board_pieces[6]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        file = sq & 7
 
-     
+        blackMaterial += PAWN_BLACK
+        mg_score -= PAWN_MG_BLACK[sq]
+        eg_score -= PAWN_EG_BLACK[sq]
 
-        elif piece_id == bt.WHITE_ROOK:    
-            whiteMaterial += ROOK_WHITE
-            mg_score += ROOK_MG_WHITE[sq]
-            eg_score += ROOK_EG_WHITE[sq]
-            phase += PHASE_ROOK
-            for i in range(8):
-                if (whitePawns >> (sq%8 + 8*i)) & 1:
-                    WhitePiece += 1
-                elif (blackPawns >> (sq%8 + 8*i)) & 1:
-                    BlackPiece += 1
-            if WhitePiece == 0 and BlackPiece ==0:
-                mg_score += ROOK_MG_OPENFILE
-                eg_score += ROOK_EG_OPENFILE
-            elif WhitePiece == 0 and BlackPiece > 0:
-                mg_score += ROOK_MG_SEMIOPENFILE
-                eg_score += ROOK_EG_SEMIOPENFILE
+        bit = np.uint64(1) << np.uint64(sq)
 
+        if (blackPawns & ADJ_FILE_MASKS[file]) == 0:
+            mg_score += ISOLATED[0]
+            eg_score += ISOLATED[1]
 
-        elif piece_id == bt.WHITE_QUEEN:   
-            whiteMaterial += QUEEN_WHITE
-            mg_score += QUEEN_MG_WHITE[sq]
-            eg_score += QUEEN_EG_WHITE[sq]
-            phase += PHASE_QUEEN
+        if (blackPawns & (FILE_MASKS[file] & ~bit)) != 0:
+            mg_score += DOUBLED[0]
+            eg_score += DOUBLED[1]
 
+        if (whitePawns & PASSED_MASK_BLACK[sq]) == 0:
+            mg_score -= PASSED[0]
+            eg_score -= PASSED[1]
 
+        bb &= bb - 1
 
-        elif piece_id == bt.WHITE_KING:    
-            whiteMaterial += KING_WHITE
-            mg_score += KING_MG_WHITE[sq]
-            eg_score += KING_EG_WHITE[sq]
+    # === BLACK KNIGHTS ===
+    bb = board_pieces[7]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        file = sq & 7
 
+        blackMaterial += KNIGHT_BLACK
+        mg_score -= KNIGHT_MG_BLACK[sq]
+        eg_score -= KNIGHT_EG_BLACK[sq]
+        phase += PHASE_KNIGHT
 
-        elif piece_id == bt.BLACK_PAWN:    
-            blackMaterial += PAWN_BLACK
-            mg_score -= PAWN_MG_BLACK[sq]
-            eg_score -= PAWN_EG_BLACK[sq]
+        mobility = 0
+        for offset in (17, 15, 10, 6, -17, -15, -10, -6):
+            to_sq = sq + offset
+            if 0 <= to_sq < 64:
+                to_file = to_sq % 8
+                if abs(to_file - file) <= 2:
+                    if bt.check_square(board_occupancy, to_sq, 1) == 0:
+                        mobility += 1
 
-            # -------------------------
-            # Fast pawn structure (bitboards)
-            # -------------------------
-            bit = (np.uint64(1) << sq)
+        mg_score -= MobilityBonus_Knight[mobility][0]
+        eg_score -= MobilityBonus_Knight[mobility][1]
 
-            # Isolated: no friendly pawn on adjacent files
-            if (blackPawns & ADJ_FILE_MASKS[file]) == 0:
-                mg_score += ISOLATED[0]
-                eg_score += ISOLATED[1]
+        bb &= bb - 1
 
-            # Doubled: another black pawn exists on same file
-            if (blackPawns & (FILE_MASKS[file] & ~bit)) != 0:
-                mg_score += DOUBLED[0]
-                eg_score += DOUBLED[1]
+    # === BLACK BISHOPS ===
+    bb = board_pieces[8]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        file = sq & 7
+        rank = sq >> 3
 
-            # Passed: for black, check squares "ahead" toward rank 1
-            if (whitePawns & PASSED_MASK_BLACK[sq]) == 0:
-                mg_score -= PASSED[0]
-                eg_score -= PASSED[1]
+        blackMaterial += BISHOP_BLACK
+        mg_score -= BISHOP_MG_BLACK[sq]
+        eg_score -= BISHOP_EG_BLACK[sq]
+        phase += PHASE_BISHOP
 
+        mobility = 0
+        for direction in (9, 7, -7, -9):
+            duplicate_sq = sq
+            while True:
+                duplicate_sq += direction
+                if not (0 <= duplicate_sq < 64):
+                    break
+                to_rank = duplicate_sq // 8
+                to_file = duplicate_sq % 8
+                if abs(to_file - file) != abs(to_rank - rank):
+                    break
+                if bt.check_square(board_occupancy, duplicate_sq, 1) != 0:
+                    break
+                mobility += 1
+                if bt.check_square(board_occupancy, duplicate_sq, 2) != 0:
+                    break
 
+        if mobility >= len(MobilityBonus_Bishop):
+            mobility = len(MobilityBonus_Bishop) - 1
 
+        mg_score -= MobilityBonus_Bishop[mobility][0]
+        eg_score -= MobilityBonus_Bishop[mobility][1]
 
+        bb &= bb - 1
 
-        elif piece_id == bt.BLACK_KNIGHT:  
-            blackMaterial += KNIGHT_BLACK
-            mg_score -= KNIGHT_MG_BLACK[sq]
-            eg_score -= KNIGHT_EG_BLACK[sq]
-            phase += PHASE_KNIGHT
-            mobility = 0
+    # === BLACK ROOKS ===
+    bb = board_pieces[9]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        file = sq & 7
 
-            for offset in (17, 15, 10, 6, -17, -15, -10, -6):
-                to_sq = sq + offset
-                if 0 <= to_sq < 64:
-                    to_file = to_sq % 8
-                    if abs(to_file - file) <= 2:
-                        # not occupied by black piece
-                        if bt.check_square(board_occupancy, to_sq, 1) == 0:
-                            mobility += 1
+        blackMaterial += ROOK_BLACK
+        mg_score -= ROOK_MG_BLACK[sq]
+        eg_score -= ROOK_EG_BLACK[sq]
+        phase += PHASE_ROOK
 
-            mg_score -= MobilityBonus_Knight[mobility][0]
-            eg_score -= MobilityBonus_Knight[mobility][1]
+        file_mask = FILE_MASKS[file]
+        has_white_pawn = (whitePawns & file_mask) != np.uint64(0)
+        has_black_pawn = (blackPawns & file_mask) != np.uint64(0)
 
-        elif piece_id == bt.BLACK_BISHOP:  
-            blackMaterial += BISHOP_BLACK
-            mg_score -= BISHOP_MG_BLACK[sq]
-            eg_score -= BISHOP_EG_BLACK[sq]
-            phase += PHASE_BISHOP
+        if not has_white_pawn and not has_black_pawn:
+            mg_score -= ROOK_MG_OPENFILE
+            eg_score -= ROOK_EG_OPENFILE
+        elif has_white_pawn and not has_black_pawn:
+            mg_score -= ROOK_MG_SEMIOPENFILE
+            eg_score -= ROOK_EG_SEMIOPENFILE
 
-            # Diagonal directions: NE(+9), NW(+7), SE(-7), SW(-9)
-            directions = (9, 7, -7, -9)
-            for i in directions:
-                duplicate_sq = sq
-                while True:
-                    duplicate_sq += i
-                    if not (0 <= duplicate_sq < 64):
-                        break
-                    to_rank = duplicate_sq // 8
-                    to_file = duplicate_sq % 8
+        bb &= bb - 1
 
-                    # Check we didn’t wrap around the board
-                    if abs(to_file - file) != abs(to_rank - rank):
-                        break
+    # === BLACK QUEENS ===
+    bb = board_pieces[10]
+    while bb:
+        sq = _bitscan(bb & (-bb))
 
-                    # Stop if blocked by black piece
-                    if bt.check_square(board_occupancy, duplicate_sq, 1) != 0:
-                        break
+        blackMaterial += QUEEN_BLACK
+        mg_score -= QUEEN_MG_BLACK[sq]
+        eg_score -= QUEEN_EG_BLACK[sq]
+        phase += PHASE_QUEEN
 
-                    mobility += 1
+        bb &= bb - 1
 
-                    # Stop if blocked by any piece (cannot jump over)
-                    if bt.check_square(board_occupancy, duplicate_sq, 2) != 0:
-                        break
+    # === BLACK KING ===
+    bb = board_pieces[11]
+    while bb:
+        sq = _bitscan(bb & (-bb))
 
-            if mobility >= len(MobilityBonus_Bishop):
-                mobility = len(MobilityBonus_Bishop) - 1
+        blackMaterial += KING_BLACK
+        mg_score -= KING_MG_BLACK[sq]
+        eg_score -= KING_EG_BLACK[sq]
 
-            mg_score -= MobilityBonus_Bishop[mobility][0]
-            eg_score -= MobilityBonus_Bishop[mobility][1]
+        bb &= bb - 1
 
-
-        elif piece_id == bt.BLACK_ROOK:    
-            blackMaterial += ROOK_BLACK
-            mg_score -= ROOK_MG_BLACK[sq]
-            eg_score -= ROOK_EG_BLACK[sq]
-            phase += PHASE_ROOK
-            for i in range(8):
-                if (whitePawns >> (sq%8 + 8*i)) & 1:
-                    WhitePiece += 1
-                elif (blackPawns >> (sq%8 + 8*i)) & 1:
-                    BlackPiece += 1
-            if WhitePiece == 0 and BlackPiece ==0:
-                mg_score -= ROOK_MG_OPENFILE
-                eg_score -= ROOK_EG_OPENFILE
-            elif WhitePiece > 0 and BlackPiece == 0:
-                mg_score -= ROOK_MG_SEMIOPENFILE
-                eg_score -= ROOK_EG_SEMIOPENFILE
-
-        elif piece_id == bt.BLACK_QUEEN:   
-            blackMaterial += QUEEN_BLACK
-            mg_score -= QUEEN_MG_BLACK[sq]
-            eg_score -= QUEEN_EG_BLACK[sq]
-            phase += PHASE_QUEEN
-
-        elif piece_id == bt.BLACK_KING:    
-            blackMaterial += KING_BLACK
-            mg_score -= KING_MG_BLACK[sq]
-            eg_score -= KING_EG_BLACK[sq]
-
-
-
+    # --- Combine ---
     totalMaterial = whiteMaterial + blackMaterial
-
     score = totalMaterial + (mg_score * phase + eg_score * (PHASE_MAX - phase)) // PHASE_MAX
-    
 
-    
-    # The engine requires the score to be relative to the player whose turn it is
-    # If absolute score is +100 (White is winning) but it's Black's turn (side_to_move = 1), we must return -100 so the engine knows Black is in a bad position.
     if side_to_move == BLACK_TO_MOVE:
         return -score
     else:

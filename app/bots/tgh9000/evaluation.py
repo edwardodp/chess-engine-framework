@@ -1,4 +1,26 @@
-import board_tools as bt
+# ============================================================================
+# MARKER NOTES — tgh9000
+# ============================================================================
+# Clean PeSTO tapered eval with pre-computed combined material+PST tables.
+# Already uses bitboard iteration (not 64-square loop) — good.
+#
+# FEATURES IMPLEMENTED:
+#   - Tapered eval with proper phase (N=1, B=1, R=2, Q=4, max 24)
+#   - Standard PeSTO PSTs for all pieces (MG + EG) using int16 arrays
+#   - Pre-computed MG_TABLE/EG_TABLE via init_tables() that combine
+#     material values + PST bonuses into single lookup — efficient design
+#   - Correct sq^56 flip for black PSTs in the pre-computed tables
+#
+# ISSUES:
+#   - CRITICAL BUG: Black piece loop was nested inside white piece loop
+#     (indentation error). Black scores were evaluated 6x, massively
+#     inflating black's material count. (FIXED by marker → dedented)
+#   - Linear bitscan O(63) worst case (FIXED by marker → O(1) binary search)
+#   - lsb_index was a nested function inside eval (FIXED → top-level @njit)
+#   - No mobility, pawn structure, king safety, or any positional features
+#     beyond material + PSTs
+# ============================================================================
+
 from numba import njit, int64, int32, uint32
 import numpy as np
 
@@ -199,111 +221,66 @@ def init_tables():
 MG_TABLE, EG_TABLE = init_tables()
 
 
+@njit
+def _bitscan(bb):
+    """Extract square index from a single-bit bitboard (LSB). O(1) binary search."""
+    sq = np.int32(0)
+    if bb & np.int64(0xFFFFFFFF00000000): sq += 32; bb >>= 32
+    if bb & np.int64(0x00000000FFFF0000): sq += 16; bb >>= 16
+    if bb & np.int64(0x000000000000FF00): sq += 8;  bb >>= 8
+    if bb & np.int64(0x00000000000000F0): sq += 4;  bb >>= 4
+    if bb & np.int64(0x000000000000000C): sq += 2;  bb >>= 2
+    if bb & np.int64(0x0000000000000002): sq += 1
+    return sq
+
+
+# NOTE (Fixed by marker):
+# 1. CRITICAL BUG: Black piece loop was indented inside white piece loop,
+#    causing black scores to be evaluated 6x. Dedented to be a sibling loop.
+# 2. Replaced linear bitscan O(63) with binary search bitscan O(1).
+# 3. Moved lsb_index from nested function to top-level @njit _bitscan.
 
 @njit(int32(int64[:], int64[:], uint32))
 def evaluation_function(board_pieces, board_occupancy, side_to_move):
-    """
-    Args:
-        board_pieces: Array of 12 bitboards (piece locations) – Do not modify
-        board_occupancy: Array of 3 bitboards (White, Black, All) – Do not modify
-        side_to_move: 0 for White, 1 for Black
-    
-    Returns:
-        int32: The score from the perspective of the side to move
-               (Positive = Current player (side to move) is winning)
-    """
     mg_white = 0
     mg_black = 0
     eg_white = 0
     eg_black = 0
     game_phase = 0
-    
-    score = 0
 
-
-    def lsb_index(bb):
-        idx = 0
-        while (bb & 1) == 0:
-            bb >>= 1
-            idx += 1
-        return idx
-    
-    
     # Evaluate white pieces (indices 0-5)
     for piece_type in range(6):
-        # gets the bit board for the current piece type
         bitboard = board_pieces[piece_type]
-        # Loops until the value stored in bitboard is 0, meaning there are no more pieces of that type to evaluate
         while bitboard:
-            # Get the least significant bit position by AND the bitboard with its negation, finding its position using bit_length, and adjusting for 0-indexing.
-            #sq = (bitboard & -bitboard).bit_length() - 1
             lsb = bitboard & -bitboard
-            sq = lsb_index(lsb)
+            sq = _bitscan(lsb)
             mg_white += MG_TABLE[piece_type][sq]
             eg_white += EG_TABLE[piece_type][sq]
             game_phase += GAMEPHASE_INC[piece_type]
-            # Clear the least significant bit
             bitboard &= bitboard - 1
-        # Evaluate black pieces (indices 6-11)
-        for piece_type in range(6):
-            bitboard = board_pieces[piece_type + 6]
-            while bitboard:
-                # Get the least significant bit position
-                #sq = (bitboard & -bitboard).bit_length() - 1
-                lsb = bitboard & -bitboard
-                sq = lsb_index(lsb)
-                mg_black += MG_TABLE[piece_type + 6][sq]
-                eg_black += EG_TABLE[piece_type + 6][sq]
-                game_phase += GAMEPHASE_INC[piece_type]
-                # Clear the least significant bit
-                bitboard &= bitboard - 1 
+
+    # Evaluate black pieces (indices 6-11)
+    for piece_type in range(6):
+        bitboard = board_pieces[piece_type + 6]
+        while bitboard:
+            lsb = bitboard & -bitboard
+            sq = _bitscan(lsb)
+            mg_black += MG_TABLE[piece_type + 6][sq]
+            eg_black += EG_TABLE[piece_type + 6][sq]
+            game_phase += GAMEPHASE_INC[piece_type]
+            bitboard &= bitboard - 1
+
     # Tapered eval
-    #calculates the midgame and endgame score if the current turn is white
     if side_to_move == WHITE:
         mg_score = mg_white - mg_black
         eg_score = eg_white - eg_black
-    #calculates the midgame and endgame score if the current turn is BLack
     else:
         mg_score = mg_black - mg_white
         eg_score = eg_black - eg_white
-    
-    
+
     mg_phase = game_phase
     if mg_phase > 24:
         mg_phase = 24
     eg_phase = 24 - mg_phase
-    
+
     return (mg_score * mg_phase + eg_score * eg_phase) // 24
-            
-            
-    """       
-    # Example: Material value counting
-    for sq in range(64):
-        piece_id = bt.get_piece(board_pieces, sq) # Helper function in `board_tools` (use them)
-        
-        # Skip empty squares
-        if piece_id == 0:
-            continue
-
-        # Add value based on piece ID (constants at top of file; use these too!)
-        if piece_id == bt.WHITE_PAWN:      score += PAWN_WHITE
-        elif piece_id == bt.WHITE_KNIGHT:  score += KNIGHT_WHITE
-        elif piece_id == bt.WHITE_BISHOP:  score += BISHOP_WHITE
-        elif piece_id == bt.WHITE_ROOK:    score += ROOK_WHITE
-        elif piece_id == bt.WHITE_QUEEN:   score += QUEEN_WHITE
-        elif piece_id == bt.WHITE_KING:    score += KING_WHITE
-        elif piece_id == bt.BLACK_PAWN:    score += PAWN_BLACK
-        elif piece_id == bt.BLACK_KNIGHT:  score += KNIGHT_BLACK
-        elif piece_id == bt.BLACK_BISHOP:  score += BISHOP_BLACK
-        elif piece_id == bt.BLACK_ROOK:    score += ROOK_BLACK
-        elif piece_id == bt.BLACK_QUEEN:   score += QUEEN_BLACK
-        elif piece_id == bt.BLACK_KING:    score += KING_BLACK
-
-
-
-    # The engine requires the score to be relative to the player whose turn it is
-    # If absolute score is +100 (White is winning) but it's Black's turn (side_to_move = 1), we must return -100 so the engine knows Black is in a bad position.
-    if side_to_move == BLACK_TO_MOVE:
-        return -score
-    return score
-    """

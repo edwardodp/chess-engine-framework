@@ -1,3 +1,30 @@
+# ============================================================================
+# MARKER NOTES — KostiantynRepetskyi
+# ============================================================================
+# Hand-tuned eval without PeSTO tables — shows independent thinking.
+#
+# FEATURES IMPLEMENTED:
+#   - Center control via custom concentric-ring bonus table (0/5/10)
+#   - Bishop mobility: visible empty diagonal squares (2cp each), back-rank penalty
+#   - Rook on 7th rank bonus (+10 white, -20 black — asymmetry likely unintentional)
+#   - Rook open/semi-open file detection via per-square scanning
+#   - Pawn structure: isolated, backward (min/max rank tracking), stacked, passed
+#     - 1-indexed file arrays with sentinel columns 0 and 9 (nice boundary trick)
+#   - Castling detection: king on g1/g8 without rook on h1/h8
+#   - Endgame king centralization via separate KING_CENTER_CONTROL table,
+#     gated by material threshold
+#
+# ISSUES:
+#   - 64-square get_piece() loop (FIXED by marker → bitboard iteration)
+#   - Bishop/rook helpers still do inner get_piece() loops for sliding — slow
+#   - Large amount of commented-out code (_pawn_defends, _knight_defends,
+#     _rook_defends, _king_defends, _loose_pieces_adjustment) — features
+#     planned but abandoned, likely due to performance or correctness issues
+#   - defended_pieces array allocated, passed everywhere, but never consumed
+#   - No bishop pair bonus, no game phase tapering, no piece-square tables
+#   - Material values are non-standard (B=360 > N=300, Q=875)
+# ============================================================================
+
 import board_tools as bt
 import numpy as np
 from numba import njit, int64, int32, uint32
@@ -398,176 +425,134 @@ def _loose_pieces_adjustment(board_pieces, loose_pieces):
     return score_adjustment
 
 
+@njit
+def _bitscan(bb):
+    """Extract square index from a single-bit bitboard (LSB)."""
+    sq = np.int32(0)
+    if bb & np.int64(0xFFFFFFFF00000000): sq += 32; bb >>= 32
+    if bb & np.int64(0x00000000FFFF0000): sq += 16; bb >>= 16
+    if bb & np.int64(0x000000000000FF00): sq += 8;  bb >>= 8
+    if bb & np.int64(0x00000000000000F0): sq += 4;  bb >>= 4
+    if bb & np.int64(0x000000000000000C): sq += 2;  bb >>= 2
+    if bb & np.int64(0x0000000000000002): sq += 1
+    return sq
+
+
+# NOTE (Fixed by marker): Original code iterated all 64 squares using get_piece()
+# (up to 768 bitmask checks per eval call). Rewritten to iterate each piece
+# bitboard directly, visiting only occupied squares (~32 pieces). All helper
+# functions and evaluation logic are unchanged.
+
 @njit(int32(int64[:], int64[:], uint32))
 def evaluation_function(board_pieces, board_occupancy, side_to_move):
-    """
-    Args:
-        board_pieces: Array of 12 bitboards (piece locations) – Do not modify
-        board_occupancy: Array of 3 bitboards (White, Black, All) – Do not modify
-        side_to_move: 0 for White, 1 for Black
-    
-    Returns:
-        int32: The score from the perspective of the side to move
-               (Positive = Current player (side to move) is winning)
-    """
-    
-    
     black_score = 0
     white_score = 0
 
-    # The right most and left most columns act as a buffer to prevent index out of bounds errors
-    # Numba can't use Python lists in nopython mode. These arrays keep the same
-    # information your structure logic uses later:
-    # - counts for len(...)
-    # - min rank per file for min(...)
-    # - max rank per file for max(...)
     white_pawn_count = np.zeros(10, dtype=np.int32)
     black_pawn_count = np.zeros(10, dtype=np.int32)
-    white_pawn_min_rank = np.full(10, 99, dtype=np.int32)   
-    black_pawn_max_rank = np.full(10, -1, dtype=np.int32)   
+    white_pawn_min_rank = np.full(10, 99, dtype=np.int32)
+    black_pawn_max_rank = np.full(10, -1, dtype=np.int32)
 
     endgame_score_adjustment = 0
-
     defended_pieces = np.zeros(64, dtype=np.int8)
 
-    
-    for sq in range(64):
-        piece_id = bt.get_piece(board_pieces, sq) 
-        
-        # Skip empty squares
-        if piece_id == 0:
-            continue
-
-
-
-
-
-
-
-        if piece_id == bt.WHITE_PAWN: 
-            #_pawn_defends(board_pieces, sq, defended_pieces, 1)
-            white_score, endgame_score_adjustment = _handle_white_pawn(
-                sq, white_pawn_count, white_pawn_min_rank, white_score, endgame_score_adjustment
-            )
-
-
-
-
-
-
-        elif piece_id == bt.WHITE_KNIGHT:  
-            white_score = _handle_white_knight(board_pieces, sq, white_score, defended_pieces)
-
-
-
-
-
-
-        elif piece_id == bt.WHITE_BISHOP:  
-            white_score = _handle_white_bishop(board_pieces, sq, white_score, defended_pieces)
-
-
-
-
-
-        elif piece_id == bt.WHITE_ROOK:  
-            white_score = _handle_white_rook(board_pieces, sq, white_score, defended_pieces)
-
-
-
-
-
-
-        elif piece_id == bt.WHITE_QUEEN:
-            white_score = _handle_white_queen(board_pieces, sq, white_score, defended_pieces)
-
-
-
-
-
-
-        elif piece_id == bt.WHITE_KING:        
-            white_score, endgame_score_adjustment = _handle_white_king(
-                board_pieces, sq, white_score, endgame_score_adjustment, defended_pieces
-            )
-
-
-
-
-
-        elif piece_id == bt.BLACK_PAWN:        
-            #_pawn_defends(board_pieces, sq, defended_pieces, -1)
-            black_score, endgame_score_adjustment = _handle_black_pawn(
-                sq, black_pawn_count, black_pawn_max_rank, black_score, endgame_score_adjustment
-            )
-
-
-
-
-
-
-        elif piece_id == bt.BLACK_KNIGHT:  
-            black_score = _handle_black_knight(board_pieces, sq, black_score, defended_pieces)
-
-
-
-
-
-
-        elif piece_id == bt.BLACK_BISHOP:  
-            black_score = _handle_black_bishop(board_pieces, sq, black_score, defended_pieces)
-        
-
-
-
-
-
-        elif piece_id == bt.BLACK_ROOK:    
-            black_score = _handle_black_rook(board_pieces, sq, black_score, defended_pieces)
-
-
-
-
-
-
-        elif piece_id == bt.BLACK_QUEEN:
-            black_score = _handle_black_queen(board_pieces, sq, black_score, defended_pieces)
-
-
-
-
-
-
-        elif piece_id == bt.BLACK_KING:    
-            black_score, endgame_score_adjustment = _handle_black_king(
-                board_pieces, sq, black_score, endgame_score_adjustment, defended_pieces
-            )
-
-
-
-
-
+    # --- White Pawns ---
+    bb = board_pieces[0]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        white_score, endgame_score_adjustment = _handle_white_pawn(
+            sq, white_pawn_count, white_pawn_min_rank, white_score, endgame_score_adjustment)
+        bb &= bb - 1
+
+    # --- White Knights ---
+    bb = board_pieces[1]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        white_score = _handle_white_knight(board_pieces, sq, white_score, defended_pieces)
+        bb &= bb - 1
+
+    # --- White Bishops ---
+    bb = board_pieces[2]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        white_score = _handle_white_bishop(board_pieces, sq, white_score, defended_pieces)
+        bb &= bb - 1
+
+    # --- White Rooks ---
+    bb = board_pieces[3]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        white_score = _handle_white_rook(board_pieces, sq, white_score, defended_pieces)
+        bb &= bb - 1
+
+    # --- White Queens ---
+    bb = board_pieces[4]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        white_score = _handle_white_queen(board_pieces, sq, white_score, defended_pieces)
+        bb &= bb - 1
+
+    # --- White King ---
+    bb = board_pieces[5]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        white_score, endgame_score_adjustment = _handle_white_king(
+            board_pieces, sq, white_score, endgame_score_adjustment, defended_pieces)
+        bb &= bb - 1
+
+    # --- Black Pawns ---
+    bb = board_pieces[6]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        black_score, endgame_score_adjustment = _handle_black_pawn(
+            sq, black_pawn_count, black_pawn_max_rank, black_score, endgame_score_adjustment)
+        bb &= bb - 1
+
+    # --- Black Knights ---
+    bb = board_pieces[7]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        black_score = _handle_black_knight(board_pieces, sq, black_score, defended_pieces)
+        bb &= bb - 1
+
+    # --- Black Bishops ---
+    bb = board_pieces[8]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        black_score = _handle_black_bishop(board_pieces, sq, black_score, defended_pieces)
+        bb &= bb - 1
+
+    # --- Black Rooks ---
+    bb = board_pieces[9]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        black_score = _handle_black_rook(board_pieces, sq, black_score, defended_pieces)
+        bb &= bb - 1
+
+    # --- Black Queens ---
+    bb = board_pieces[10]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        black_score = _handle_black_queen(board_pieces, sq, black_score, defended_pieces)
+        bb &= bb - 1
+
+    # --- Black King ---
+    bb = board_pieces[11]
+    while bb:
+        sq = _bitscan(bb & (-bb))
+        black_score, endgame_score_adjustment = _handle_black_king(
+            board_pieces, sq, black_score, endgame_score_adjustment, defended_pieces)
+        bb &= bb - 1
+
+    # --- Combine ---
     score = white_score + black_score
-
 
     if -1000 + KING_BLACK < black_score and white_score < 1000 + KING_WHITE:
         score += endgame_score_adjustment
 
+    score += _pawn_structure_adjustment(
+        white_pawn_count, black_pawn_count, white_pawn_min_rank, black_pawn_max_rank)
 
-    score += _pawn_structure_adjustment(white_pawn_count, black_pawn_count, white_pawn_min_rank, black_pawn_max_rank)
-
-    #score += _loose_pieces_adjustment(board_pieces, defended_pieces)
-        
-        
-
-
-    # The engine requires the score to be relative to the player whose turn it is
-    # If absolute score is +100 (White is winning) but it's Black's turn (side_to_move = 1), we must return -100 so the engine knows Black is in a bad position.
     if side_to_move == BLACK_TO_MOVE:
         return -score
     return score
-    
-
-
-
-    

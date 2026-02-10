@@ -1,11 +1,16 @@
 import json
 import math
+import os
 import numpy as np
 from numba import njit, int64, int32, uint32, uint64
 
 #Sparse attention transformer evaluation function for chess positions, with a simple material + positional baseline.
 #Temporal Difference took too long, trained on stockfish data. 
-MODEL_NPZ = "model_numba.npz"
+
+# NOTE (Fixed by marker): np.load("model_numba.npz") used a relative path which
+# fails when the working directory isn't the bot's folder. Fixed to use absolute
+# path relative to this file's location.
+MODEL_NPZ = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model_numba.npz")
 
 
 

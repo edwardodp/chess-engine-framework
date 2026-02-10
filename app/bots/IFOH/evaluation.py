@@ -1,31 +1,23 @@
+# NOTE (Fixed by marker): Original code iterated all 64 squares using get_piece()
+# (768 bitmask checks per eval call). Rewritten to iterate bitboards directly,
+# visiting only occupied squares (~32 pieces). Also replaced numpy array membership
+# test (sq in CENTER_SQUARES) with a single bitmask AND. Material/PST arrays changed
+# from uint32 to int32 to avoid signed/unsigned mixing issues in Numba.
+# Evaluation logic and weights are unchanged.
+
 import board_tools as bt
 from numba import njit, int64, int32, uint32
 import numpy as np
 
 WHITE = 0
 BLACK = 1
-WHITE_TO_MOVE = 0
-BLACK_TO_MOVE = 1
 
-CENTER_SQUARES = np.array([27, 28, 35, 36], dtype=np.int32)
-PAWN_CENTER_BONUS_MG = 20
-PAWN_CENTER_BONUS_EG = 5
-PAWN_PUSH_EG = 20
+PAWN_CENTER_BONUS_MG = np.int32(20)
+PAWN_CENTER_BONUS_EG = np.int32(5)
+PAWN_PUSH_EG = np.int32(20)
 
-@njit
-def PCOLOUR(p):
-    if p < 0:
-        return BLACK
-    else:
-        return WHITE
-
-@njit
-def FLIP(sq):
-    return sq ^ 56
-
-@njit
-def OTHER(side):
-    return side ^ 1
+# Center squares d4, e4, d5, e5 as a single bitmask
+CENTER_MASK = np.int64((1 << 27) | (1 << 28) | (1 << 35) | (1 << 36))
 
 mg_pawn_table = np.array(
     [
@@ -179,86 +171,98 @@ eg_king_table = np.array(
         -18,  -4,  21,  24,  27,  23,   9, -11,
         -19,  -3,  11,  21,  23,  16,   7,  -9,
         -27, -11,   4,  13,  14,   4,  -5, -17,
-        -53, -34, -21, -11, -28, -14, -24, -43
+        -53, -34, -21, -11, -28, -14, -24, -43,
     ],
+    dtype=np.int32)
+
+# Stacked as (6, 64) arrays for indexed access
+mg_pesto_table = np.array(
+    [mg_pawn_table, mg_knight_table, mg_bishop_table,
+     mg_rook_table, mg_queen_table, mg_king_table],
     dtype=np.int32)
 
 eg_pesto_table = np.array(
-    [
-        eg_pawn_table,
-        eg_knight_table,
-        eg_bishop_table,
-        eg_rook_table,
-        eg_queen_table,
-        eg_king_table
-    ],
+    [eg_pawn_table, eg_knight_table, eg_bishop_table,
+     eg_rook_table, eg_queen_table, eg_king_table],
     dtype=np.int32)
 
-mg_pesto_table = np.array(
-    [
-        mg_pawn_table,
-        mg_knight_table,
-        mg_bishop_table,
-        mg_rook_table,
-        mg_queen_table,
-        mg_king_table
-    ],
-    dtype=np.int32)
+gamephaseInc = np.array([0, 1, 1, 2, 4, 0], dtype=np.int32)
+mg_value = np.array([82, 337, 365, 477, 1025, 0], dtype=np.int32)
+eg_value = np.array([94, 281, 297, 512, 936, 0], dtype=np.int32)
 
-gamephaseInc = np.array([0,1,1,2,4,0], dtype=np.uint32) #pNBRQK
-mg_value = np.array([82, 337, 365, 477, 1025, 0], dtype=np.uint32)
-eg_value = np.array([94, 281, 297, 512, 936, 0], dtype=np.uint32)
 
 @njit(int32(int64[:], int64[:], uint32))
 def evaluation_function(board_pieces, board_occupancy, side_to_move):
-    """
-    Args:
-        board_pieces: Array of 12 bitboards (piece locations) – Do not modify
-        board_occupancy: Array of 3 bitboards (White, Black, All) – Do not modify
-        side_to_move: 0 for White, 1 for Black
-    
-    Returns:
-        int32: The score from the perspective of the side to move
-               (Positive = Current player (side to move) is winning)
-    """
+    mg_white = np.int32(0)
+    mg_black = np.int32(0)
+    eg_white = np.int32(0)
+    eg_black = np.int32(0)
+    gamePhase = np.int32(0)
 
-    mg = np.array([0, 0], dtype=np.int32)
-    eg = np.array([0, 0], dtype=np.int32)
-    gamePhase = 0
-    
-    for sq in range(64):
-        piece_id = bt.get_piece(board_pieces, sq) # Helper function in `board_tools` (use them)
-        if piece_id == 0:
-            continue
-        colour = PCOLOUR(piece_id)
-        if colour == WHITE:
-            mg[colour] += mg_value[piece_id-1] + mg_pesto_table[piece_id-1][sq]
-            eg[colour] += eg_value[piece_id-1] + eg_pesto_table[piece_id-1][sq]
-        else:
-            piece_id = abs(piece_id)
-            mg[colour] += mg_value[piece_id-1] + mg_pesto_table[piece_id-1][FLIP(sq)]
-            eg[colour] += eg_value[piece_id-1] + eg_pesto_table[piece_id-1][FLIP(sq)]
-        
-        # central pawn bonus
-        if piece_id == 1:
-            if sq in CENTER_SQUARES:
-                mg[colour] += PAWN_CENTER_BONUS_MG
-                eg[colour] += PAWN_CENTER_BONUS_EG
+    for piece_type in range(6):
+        # --- White pieces (indices 0-5) ---
+        bb = board_pieces[piece_type]
+        while bb:
+            # Bitscan via binary search (O(1), 6 comparisons)
+            lsb = bb & (-bb)
+            sq = np.int32(0)
+            temp = lsb
+            if temp & np.int64(0xFFFFFFFF00000000): sq += 32; temp >>= 32
+            if temp & np.int64(0x00000000FFFF0000): sq += 16; temp >>= 16
+            if temp & np.int64(0x000000000000FF00): sq += 8;  temp >>= 8
+            if temp & np.int64(0x00000000000000F0): sq += 4;  temp >>= 4
+            if temp & np.int64(0x000000000000000C): sq += 2;  temp >>= 2
+            if temp & np.int64(0x0000000000000002): sq += 1
 
-            # Endgame promotion bonus
-            if colour == WHITE:
+            mg_white += mg_value[piece_type] + mg_pesto_table[piece_type, sq]
+            eg_white += eg_value[piece_type] + eg_pesto_table[piece_type, sq]
+
+            if piece_type == 0:  # pawn
+                if lsb & CENTER_MASK:
+                    mg_white += PAWN_CENTER_BONUS_MG
+                    eg_white += PAWN_CENTER_BONUS_EG
                 rank = sq >> 3
-            else:
-                rank = FLIP(sq) >> 3
-            eg[colour] += (rank**2) * PAWN_PUSH_EG
+                eg_white += rank * rank * PAWN_PUSH_EG
 
-        gamePhase += gamephaseInc[piece_id-1]
+            gamePhase += gamephaseInc[piece_type]
+            bb &= bb - 1
 
-    #re-centers the evaluation on the side to move
-    mgScore = mg[side_to_move] - mg[OTHER(side_to_move)]
-    egScore = eg[side_to_move] - eg[OTHER(side_to_move)]
-    
-    mgPhase = min(gamePhase, 24)  #24 is the maximum middlegame phase. If promotions happen early, gamePhase might exceed so needs clamping
-    egPhase = 24 - mgPhase
+        # --- Black pieces (indices 6-11) ---
+        bb = board_pieces[piece_type + 6]
+        while bb:
+            lsb = bb & (-bb)
+            sq = np.int32(0)
+            temp = lsb
+            if temp & np.int64(0xFFFFFFFF00000000): sq += 32; temp >>= 32
+            if temp & np.int64(0x00000000FFFF0000): sq += 16; temp >>= 16
+            if temp & np.int64(0x000000000000FF00): sq += 8;  temp >>= 8
+            if temp & np.int64(0x00000000000000F0): sq += 4;  temp >>= 4
+            if temp & np.int64(0x000000000000000C): sq += 2;  temp >>= 2
+            if temp & np.int64(0x0000000000000002): sq += 1
 
-    return (mgScore * mgPhase + egScore * egPhase) // 24
+            flipped = sq ^ np.int32(56)
+            mg_black += mg_value[piece_type] + mg_pesto_table[piece_type, flipped]
+            eg_black += eg_value[piece_type] + eg_pesto_table[piece_type, flipped]
+
+            if piece_type == 0:  # pawn
+                if lsb & CENTER_MASK:
+                    mg_black += PAWN_CENTER_BONUS_MG
+                    eg_black += PAWN_CENTER_BONUS_EG
+                rank = flipped >> 3
+                eg_black += rank * rank * PAWN_PUSH_EG
+
+            gamePhase += gamephaseInc[piece_type]
+            bb &= bb - 1
+
+    # Score from side-to-move perspective
+    if side_to_move == 0:
+        mgScore = mg_white - mg_black
+        egScore = eg_white - eg_black
+    else:
+        mgScore = mg_black - mg_white
+        egScore = eg_black - eg_white
+
+    mgPhase = min(gamePhase, np.int32(24))
+    egPhase = np.int32(24) - mgPhase
+
+    return np.int32((mgScore * mgPhase + egScore * egPhase) // 24)
