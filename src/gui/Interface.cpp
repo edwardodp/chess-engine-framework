@@ -18,6 +18,27 @@
 
 extern std::atomic<int> g_current_searcher;
 
+// Convert a Move to UCI string (e.g. "e2e4", "e7e8q")
+static std::string move_to_uci(const Move& m) {
+    int from = static_cast<int>(m.from());
+    int to   = static_cast<int>(m.to());
+    char buf[6];
+    buf[0] = 'a' + (from % 8);
+    buf[1] = '1' + (from / 8);
+    buf[2] = 'a' + (to % 8);
+    buf[3] = '1' + (to / 8);
+    int len = 4;
+    if (m.is_promotion()) {
+        if      (m.is_promo_queen())  buf[4] = 'q';
+        else if (m.is_promo_rook())   buf[4] = 'r';
+        else if (m.is_promo_bishop()) buf[4] = 'b';
+        else if (m.is_promo_knight()) buf[4] = 'n';
+        len = 5;
+    }
+    buf[len] = '\0';
+    return std::string(buf);
+}
+
 const int TILE_SIZE = 75;
 const int BOARD_PADDING = 30;
 const int PANEL_WIDTH = 300;
@@ -64,7 +85,8 @@ int get_piece_at(const BoardState& b, Square sq) {
 }
 
 namespace GUI {
-    void Launch(Search::EvalCallback evalFunc, int depth, int human_side_int, std::string start_fen) {
+    void Launch(Search::EvalCallback evalFunc, int depth, int human_side_int,
+                std::string start_fen, std::string& uci_moves_out) {
         sf::RenderWindow window(sf::VideoMode(WIN_WIDTH, WIN_HEIGHT), "Chess Engine");
         window.setFramerateLimit(60);
         ImGui::SFML::Init(window);
@@ -106,6 +128,8 @@ namespace GUI {
 
         bool game_over = false;
         std::string winner_text = "";
+        std::vector<std::string> move_history;  // Committed UCI moves for PGN export
+        std::vector<Move> move_stack;             // Committed Move objects for undo
 
         // --- THREADING STATE ---
         std::thread bot_thread;
@@ -240,6 +264,8 @@ namespace GUI {
                                         if(idx==2 && m.is_promo_bishop()) match=true;
                                         if(idx==3 && m.is_promo_knight()) match=true;
                                         if(match) { 
+                                            move_history.push_back(move_to_uci(m));
+                                            move_stack.push_back(m);
                                             board.make_move(m); is_promoting=false; selected_sq=Square::None; valid_moves.clear(); 
                                             check_game_over(board); break; 
                                         }
@@ -254,6 +280,8 @@ namespace GUI {
                                     for (const auto& m : valid_moves) {
                                         if (m.to() == clicked) {
                                             if (m.is_promotion()) { is_promoting=true; promo_from=m.from(); promo_to=m.to(); moved=true; break; }
+                                            move_history.push_back(move_to_uci(m));
+                                            move_stack.push_back(m);
                                             board.make_move(m); selected_sq = Square::None; valid_moves.clear(); moved = true;
                                             check_game_over(board); break;
                                         }
@@ -350,11 +378,39 @@ namespace GUI {
                     }
                     is_promoting = false; last_stats = Search::SearchStats();
                     game_over = false; winner_text = "";
+                    move_history.clear();
+                    move_stack.clear();
                 }
             } else {
                 ImGui::BeginDisabled();
                 ImGui::Button("Reset (Busy)", ImVec2(100, 30));
                 ImGui::EndDisabled();
+            }
+
+            // Undo Move — only in Human vs Bot, when bot is idle
+            // Takes back 2 plies (bot response + human move) so it's the human's turn again
+            // If only 1 move exists (human moved, bot hasn't replied yet), undo just that one
+            if (!bot_vs_bot && !is_thinking) {
+                bool can_undo = !move_stack.empty() && (board.to_move == human_side || game_over);
+                if (can_undo) {
+                    ImGui::SameLine();
+                    if (ImGui::Button("Undo Move", ImVec2(100, 30))) {
+                        // If it's the human's turn, undo 2 plies (bot + human)
+                        // If game is over on bot's turn (e.g. human delivered checkmate), undo 1 ply
+                        int plies_to_undo = (board.to_move == human_side && move_stack.size() >= 2) ? 2 : 1;
+                        for (int i = 0; i < plies_to_undo && !move_stack.empty(); ++i) {
+                            board.undo_move(move_stack.back());
+                            move_stack.pop_back();
+                            move_history.pop_back();
+                        }
+                        selected_sq = Square::None;
+                        valid_moves.clear();
+                        is_promoting = false;
+                        game_over = false;
+                        winner_text = "";
+                        last_stats = Search::SearchStats();
+                    }
+                }
             }
 
             ImGui::End();
@@ -386,6 +442,8 @@ namespace GUI {
                 bot_thread.join();
                 
                 if (bot_move_result.raw() != 0) {
+                    move_history.push_back(move_to_uci(bot_move_result));
+                    move_stack.push_back(bot_move_result);
                     board.make_move(bot_move_result);
                     check_game_over(board);
                     last_stats = bot_stats_result;
@@ -402,6 +460,14 @@ namespace GUI {
         }
         
         if (bot_thread.joinable()) bot_thread.join();
+
+        // Build UCI move string for PGN export
+        uci_moves_out.clear();
+        for (size_t i = 0; i < move_history.size(); ++i) {
+            if (i > 0) uci_moves_out += ' ';
+            uci_moves_out += move_history[i];
+        }
+
         ImGui::SFML::Shutdown();
     }
 }

@@ -4,7 +4,7 @@ import glob
 import ctypes
 import importlib.util
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog
 import numpy as np
 import multiprocessing
 import time
@@ -472,13 +472,18 @@ class LauncherApp:
 
         self.set_status(f"Running: {w_name} vs {b_name}…", FG_ACCENT)
         self.root.withdraw()
+        uci_moves = ""
         try:
-            self.run_cpp_engine(w_func, b_func, mode)
+            uci_moves = self.run_cpp_engine(w_func, b_func, mode)
         except Exception as e:
             print(f"[ERROR] Engine Crash: {e}")
         finally:
             self.root.deiconify()
             self.set_status(f"{len(self.bots_dict)} bot(s) loaded  ·  Ready")
+
+        if uci_moves.strip():
+            fen = self.fen_var.get()
+            self._offer_pgn_save(uci_moves, w_name, b_name, fen)
 
     def run_cpp_engine(self, white_cb, black_cb, mode):
         curr_dir = os.path.dirname(os.path.abspath(__file__))
@@ -496,6 +501,84 @@ class LauncherApp:
         print("[PYTHON DEBUG] Calling C++ startEngine...")
         chess_lib.startEngine(white_cb.address, black_cb.address,
                               COMPETITION_DEPTH, mode, fen_bytes)
+
+        # Fetch committed moves from the C++ side (available after GUI closes)
+        chess_lib.getLastGameMoves.restype = ctypes.c_char_p
+        raw = chess_lib.getLastGameMoves()
+        uci_str = raw.decode('utf-8') if raw else ""
+        return uci_str
+
+    def _offer_pgn_save(self, uci_str, white_name, black_name, fen="startpos"):
+        """Replay UCI moves with python-chess and offer to save as PGN."""
+        try:
+            import chess
+            import chess.pgn
+            from datetime import date
+        except ImportError:
+            print("[WARNING] python-chess not installed, cannot export PGN")
+            return
+
+        # Use custom FEN if not standard starting position
+        is_custom = fen and fen not in ("startpos", "", chess.STARTING_FEN)
+        if is_custom:
+            board = chess.Board(fen)
+        else:
+            board = chess.Board()
+
+        game = chess.pgn.Game()
+        game.headers["Event"] = "Chess Engine Showdown"
+        game.headers["Site"] = "Chess Engine Framework"
+        game.headers["Date"] = date.today().strftime("%Y.%m.%d")
+        game.headers["White"] = white_name
+        game.headers["Black"] = black_name
+
+        if is_custom:
+            game.headers["FEN"] = fen
+            game.headers["SetUp"] = "1"
+            game.setup(board)
+
+        node = game
+        for uci in uci_str.split():
+            try:
+                move = chess.Move.from_uci(uci)
+                if move not in board.legal_moves:
+                    print(f"[PGN WARNING] Illegal move {uci} at position {board.fen()}")
+                    break
+                node = node.add_variation(move)
+                board.push(move)
+            except Exception as e:
+                print(f"[PGN WARNING] Failed to parse move '{uci}': {e}")
+                break
+
+        # Determine result
+        if board.is_checkmate():
+            result = "0-1" if board.turn == chess.WHITE else "1-0"
+        elif board.is_stalemate() or board.is_insufficient_material() or \
+             board.can_claim_fifty_moves() or board.can_claim_threefold_repetition():
+            result = "1/2-1/2"
+        else:
+            result = "*"
+        game.headers["Result"] = result
+
+        pgn_text = str(game)
+        print(f"\n[PGN] Game: {white_name} vs {black_name} — {result}")
+        print(f"[PGN] {len(uci_str.split())} moves recorded\n")
+
+        filepath = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Save Game as PGN",
+            defaultextension=".pgn",
+            filetypes=[("PGN files", "*.pgn"), ("All files", "*.*")],
+            initialfile=f"{white_name}_vs_{black_name}.pgn"
+        )
+        if filepath:
+            with open(filepath, 'w') as f:
+                f.write(pgn_text)
+                f.write('\n')
+            print(f"[PGN] Saved to {filepath}")
+            self.set_status(f"PGN saved: {os.path.basename(filepath)}", FG_GREEN)
+        else:
+            self.set_status(f"Game complete: {result}  ·  PGN export skipped")
 
     # -----------------------------------------------------------
     # HEADLESS TOURNAMENT

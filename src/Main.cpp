@@ -14,6 +14,7 @@ static Search::EvalCallback global_white_eval = nullptr;
 static Search::EvalCallback global_black_eval = nullptr;
 
 std::atomic<int> g_current_searcher{0};
+static std::string g_last_game_moves;  // UCI moves from last headed game
 
 int cpp_dispatcher(const uint64_t* pieces, const uint64_t* occupancy, int side) {
     int searcher = g_current_searcher.load(std::memory_order_relaxed);
@@ -33,7 +34,14 @@ extern "C" {
 
         std::string fen_str = (fen != nullptr) ? std::string(fen) : "startpos";
         
-        GUI::Launch((Search::EvalCallback)cpp_dispatcher, depth, human_side, fen_str);
+        GUI::Launch((Search::EvalCallback)cpp_dispatcher, depth, human_side, fen_str, g_last_game_moves);
+    }
+
+    #ifdef _WIN32
+    __declspec(dllexport)
+    #endif
+    const char* getLastGameMoves() {
+        return g_last_game_moves.c_str();
     }
 
     // Headless game: returns 0=draw, 1=white win, 2=black win, -1=exceeded max moves
@@ -120,7 +128,8 @@ extern "C" {
 #ifndef BUILD_AS_LIBRARY
 int main() {
     std::cout << "Starting Standalone Engine (Human vs Bot)" << std::endl;
-    GUI::Launch(Evaluation::evaluate, 5, 0, "startpos"); 
+    std::string moves_out;
+    GUI::Launch(Evaluation::evaluate, 5, 0, "startpos", moves_out); 
     return 0;
 }
 #endif
