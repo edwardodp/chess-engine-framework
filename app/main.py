@@ -16,6 +16,32 @@ COMPETITION_DEPTH = 7
 MAX_MOVES_PER_GAME = 600
 LOADED_BOTS_CACHE = {}
 
+import platform
+
+def get_chess_lib_path():
+    """Return the path to the correct shared library for this OS/arch."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    bindings_dir = os.path.abspath(os.path.join(script_dir, "..", "bindings"))
+
+    system = platform.system()
+    if system == "Windows":
+        lib_name = "ChessLib.dll"
+    elif system == "Linux":
+        lib_name = "libChessLib.so"
+    elif system == "Darwin":
+        machine = platform.machine()
+        if machine == "arm64":
+            lib_name = "libChessLib_arm64.dylib"
+        else:
+            lib_name = "libChessLib_intel.dylib"
+    else:
+        raise RuntimeError(f"Unsupported platform: {system}")
+
+    lib_path = os.path.join(bindings_dir, lib_name)
+    if not os.path.exists(lib_path):
+        raise FileNotFoundError(f"Chess library not found: {lib_path}")
+    return lib_path
+
 # 4 balanced openings — replace with Stockfish-verified FENs later
 TOURNAMENT_OPENINGS = [
     ("Starting Position", "startpos"),
@@ -176,11 +202,7 @@ def _run_game_worker(result_queue, game_id, white_name, white_path,
             return
 
         # Load C++ library
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        bindings_dir = os.path.join(script_dir, "..", "bindings")
-        lib_name = "libChessLib.dylib"
-        lib_path = os.path.abspath(os.path.join(bindings_dir, lib_name))
-
+        lib_path = get_chess_lib_path()
         chess_lib = ctypes.CDLL(lib_path)
         chess_lib.runHeadlessGame.argtypes = [
             ctypes.c_void_p, ctypes.c_void_p,
@@ -486,11 +508,7 @@ class LauncherApp:
             self._offer_pgn_save(uci_moves, w_name, b_name, fen)
 
     def run_cpp_engine(self, white_cb, black_cb, mode):
-        curr_dir = os.path.dirname(os.path.abspath(__file__))
-        bindings_dir = os.path.join(curr_dir, "..", "bindings")
-        lib_name = "libChessLib.dylib"
-        lib_path = os.path.abspath(os.path.join(bindings_dir, lib_name))
-
+        lib_path = get_chess_lib_path()
         chess_lib = ctypes.CDLL(lib_path)
         chess_lib.startEngine.argtypes = [
             ctypes.c_void_p, ctypes.c_void_p,
