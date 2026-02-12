@@ -12,7 +12,7 @@ import time
 # -----------------------------------------------------------
 # CONFIGURATION
 # -----------------------------------------------------------
-COMPETITION_DEPTH = 5
+COMPETITION_DEPTH = 7
 MAX_MOVES_PER_GAME = 600
 LOADED_BOTS_CACHE = {}
 
