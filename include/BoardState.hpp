@@ -143,7 +143,7 @@ struct BoardState {
         for (int i = history.size() - 2; i >= (int)history.size() - limit; i -= 2) {
             if (history[i].key == key) {
                 rep_count++;
-                if (rep_count >= 1) return true;
+                if (rep_count >= 2) return true;  // Threefold: current + 2 previous
             }
         }
         return false;
